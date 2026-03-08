@@ -268,9 +268,25 @@ Deno.serve(async (req) => {
           const allTitles = results.map(r => r.title).join(' | ');
           foundPrice = extractPrice(allContent, allTitles, product.name, store, referencePrice);
 
+          const isSuspiciousTunisiatechPrice =
+            store === 'tunisiatech' &&
+            !!foundPrice &&
+            !!referencePrice &&
+            foundPrice < referencePrice * 0.6;
+
           // Tunisiatech frequently returns listing snippets, so try exact URL extraction if needed
-          if (!foundPrice && store === 'tunisiatech') {
+          if ((store === 'tunisiatech') && (!foundPrice || isSuspiciousTunisiatechPrice)) {
             foundPrice = await extractPriceFromDirectUrl(url, product.name, store, referencePrice);
+          }
+
+          if (
+            store === 'tunisiatech' &&
+            !!foundPrice &&
+            !!referencePrice &&
+            foundPrice < referencePrice * 0.6
+          ) {
+            console.log(`Discarding suspicious Tunisiatech price for ${product.name}: ${foundPrice} (ref: ${referencePrice})`);
+            foundPrice = null;
           }
 
           console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'no price found'} (${results.length} results)`);
