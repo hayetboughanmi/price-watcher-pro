@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Eye, Trash2 } from 'lucide-react';
 import { Product, PriceEntry, STORE_CONFIG, StoreName } from '@/types';
 import { motion } from 'framer-motion';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 
 interface ProductTableProps {
@@ -46,17 +47,18 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
         <CardTitle className="font-display text-lg">Produits Surveillés</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <Table className="table-fixed w-full">
+        <ScrollArea className="w-full">
+        <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow className="border-border/50">
-              <TableHead className="w-[22%]">Produit</TableHead>
-              <TableHead className="w-[10%]">Catégorie</TableHead>
+              <TableHead>Produit</TableHead>
+              <TableHead>Catégorie</TableHead>
               {Object.values(STORE_CONFIG).map(store => (
-                <TableHead key={store.label} className="text-center w-[11%] px-1">{store.label}</TableHead>
+                <TableHead key={store.label} className="text-center">{store.label}</TableHead>
               ))}
-              <TableHead className="text-center w-[12%] px-1">Meilleur</TableHead>
-              <TableHead className="text-center w-[9%] px-1">Statut</TableHead>
-              <TableHead className="text-right w-[8%] px-1">Actions</TableHead>
+              <TableHead className="text-center">Meilleur Prix</TableHead>
+              <TableHead className="text-center">Statut</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -130,6 +132,8 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
             })}
           </TableBody>
         </Table>
+        <ScrollBar orientation="horizontal" />
+        </ScrollArea>
       </CardContent>
     </Card>
   );
