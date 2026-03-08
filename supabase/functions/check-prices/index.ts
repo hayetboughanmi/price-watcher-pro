@@ -80,7 +80,7 @@ async function extractPriceWithAI(content: string, title: string, productName: s
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall) {
       const args = JSON.parse(toolCall.function.arguments);
-      if (args.price && args.confidence !== 'low' && args.price > 50 && args.price < 100000) {
+      if (args.price && args.confidence !== 'low' && args.price >= 1000 && args.price < 50000) {
         return Math.round(args.price * 100) / 100;
       }
     }
