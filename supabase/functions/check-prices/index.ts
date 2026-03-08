@@ -250,7 +250,17 @@ Deno.serve(async (req) => {
             LOVABLE_API_KEY,
           );
 
-          // 2) Fallback path: Tavily search + AI extraction
+          // 2) Secondary path: store-native search page (works when product URL is outdated)
+          if (!foundPrice) {
+            foundPrice = await extractPriceFromStoreSearch(
+              store,
+              product.name,
+              storeLabel,
+              LOVABLE_API_KEY,
+            );
+          }
+
+          // 3) Last fallback: Tavily search + AI extraction
           if (!foundPrice) {
             const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
 
