@@ -150,9 +150,9 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               api_key: TAVILY_API_KEY,
               query: searchQuery,
-              search_depth: 'basic',
-              include_raw_content: false,
-              max_results: 3,
+              search_depth: 'advanced',
+              include_raw_content: true,
+              max_results: 5,
               include_domains: [storeNames[store]],
             }),
           });
