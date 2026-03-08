@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Bell, TrendingDown, TrendingUp, CheckCheck } from 'lucide-react';
+import { Bell, TrendingDown, TrendingUp, CheckCheck, Sparkles } from 'lucide-react';
 import { PriceAlert, STORE_CONFIG } from '@/types';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
@@ -66,7 +66,7 @@ const AlertsList = ({ alerts, onMarkRead, onMarkAllRead }: AlertsListProps) => {
                     {!alert.isRead && <span className="w-2 h-2 rounded-full bg-primary shrink-0" />}
                   </div>
                   <div className="flex items-center gap-2 mb-2">
-                    <Badge variant="outline" className="text-xs">{STORE_CONFIG[alert.store].label}</Badge>
+                    <Badge variant="outline" className="text-xs">{STORE_CONFIG[alert.store]?.label || alert.store}</Badge>
                     <span className="text-xs text-muted-foreground">
                       {alert.oldPrice.toLocaleString()} → {alert.newPrice.toLocaleString()} TND
                     </span>
@@ -76,8 +76,16 @@ const AlertsList = ({ alerts, onMarkRead, onMarkAllRead }: AlertsListProps) => {
                       {alert.changePercent > 0 ? '+' : ''}{alert.changePercent.toFixed(1)}%
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{alert.recommendation}</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">
+                  {alert.recommendation && (
+                    <div className="mt-2 p-2.5 rounded-md bg-accent/50 border border-accent">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Sparkles className="h-3 w-3 text-primary" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">Recommandation IA</span>
+                      </div>
+                      <p className="text-xs leading-relaxed text-foreground/90">{alert.recommendation}</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground/60 mt-1.5">
                     {formatDistanceToNow(new Date(alert.createdAt), { addSuffix: true, locale: fr })}
                   </p>
                 </div>
