@@ -251,11 +251,12 @@ Deno.serve(async (req) => {
 
         try {
           const storeLabel = storeLabels[store] || store;
+          const normalizedUrl = normalizeProductUrl(store, url);
           let foundPrice: number | null = null;
 
           // 1) Primary path: use exact product URL for better precision and no Tavily dependency
           foundPrice = await extractPriceFromDirectUrl(
-            url,
+            normalizedUrl,
             product.name,
             storeLabel,
             LOVABLE_API_KEY,
