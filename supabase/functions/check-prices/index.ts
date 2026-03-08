@@ -29,26 +29,94 @@ interface TavilyResult {
   title: string;
 }
 
-function extractPrice(content: string, title: string): number | null {
-  // Match Tunisian Dinar prices in various formats
-  const patterns = [
-    /(\d[\d\s,.]*)\s*(?:TND|DT|دينار)/i,
-    /(?:prix|price|سعر)\s*:?\s*(\d[\d\s,.]*)/i,
-    /(\d{3,}[.,]\d{3})/,  // e.g. 4,299 or 4.299
-    /(\d{3,})\s*(?:TND|DT|dinars?)/i,
-  ];
+async function extractPriceWithAI(content: string, title: string, productName: string, storeName: string): Promise<number | null> {
+  // First try regex for obvious prices
+  const regexPrice = extractPriceRegex(content, title);
+  if (regexPrice) return regexPrice;
 
-  const textToSearch = `${title} ${content}`;
-  
-  for (const pattern of patterns) {
-    const match = textToSearch.match(pattern);
-    if (match) {
-      const priceStr = match[1].replace(/\s/g, '').replace(',', '.');
-      const price = parseFloat(priceStr);
-      if (price > 10 && price < 100000) {
-        return Math.round(price * 100) / 100;
+  // Fallback to AI extraction
+  try {
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) return null;
+
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-3-flash-preview',
+        messages: [
+          { role: 'system', content: 'Extract the selling price in TND (Tunisian Dinar) for the specified product from the given text. Return ONLY the numeric price (e.g. 4299). If you cannot find the exact price, return "null". Do NOT return model numbers, storage sizes, or other numbers — only the actual selling price.' },
+          { role: 'user', content: `Product: ${productName}\nStore: ${storeName}\nTitle: ${title}\nContent: ${content.substring(0, 1500)}\n\nWhat is the selling price in TND?` },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'extract_price',
+            description: 'Extract the product price in TND',
+            parameters: {
+              type: 'object',
+              properties: {
+                price: { type: 'number', description: 'The selling price in TND, or null if not found' },
+                confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in the extracted price' },
+              },
+              required: ['price', 'confidence'],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'extract_price' } },
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('AI price extraction error:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (toolCall) {
+      const args = JSON.parse(toolCall.function.arguments);
+      if (args.price && args.confidence !== 'low' && args.price > 50 && args.price < 100000) {
+        return Math.round(args.price * 100) / 100;
       }
     }
+  } catch (e) {
+    console.error('AI extraction failed:', e);
+  }
+  return null;
+}
+
+function extractPriceRegex(content: string, title: string): number | null {
+  const textToSearch = `${title} ${content}`;
+  
+  // Only match prices that are clearly marked with currency
+  const patterns = [
+    /(\d[\d\s]*[\d])\s*(?:TND|DT)\b/gi,
+    /(?:prix|price)\s*:?\s*(\d[\d\s]*[\d])\s*(?:TND|DT)/gi,
+  ];
+
+  const candidates: number[] = [];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(textToSearch)) !== null) {
+      const priceStr = match[1].replace(/\s/g, '').replace(',', '.');
+      const price = parseFloat(priceStr);
+      // Only accept prices in reasonable range for Tunisian electronics
+      if (price >= 100 && price < 50000) {
+        candidates.push(price);
+      }
+    }
+  }
+  
+  // Return the most likely price (highest in range, as product prices tend to be prominent)
+  if (candidates.length > 0) {
+    // Sort and return the most reasonable one (not outlier)
+    candidates.sort((a, b) => b - a);
+    return Math.round(candidates[0] * 100) / 100;
   }
   return null;
 }
