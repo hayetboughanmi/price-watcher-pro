@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
     );
 
     const newPriceEntries: any[] = [];
-    const newAlerts: any[] = [];
+    const alertCandidates: any[] = [];
 
     for (const result of results) {
       if (result.status !== 'fulfilled' || !result.value.price) continue;
@@ -182,17 +182,24 @@ Deno.serve(async (req) => {
         const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
         const direction = foundPrice < oldPrice ? 'down' : 'up';
 
-        newAlerts.push({
+        // Gather all current prices for this product across stores
+        const allPrices: Record<string, number> = {};
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.price && r.value.product.id === product.id) {
+            allPrices[r.value.storeLabel] = r.value.price;
+          }
+        }
+
+        alertCandidates.push({
           product_id: product.id,
           product_name: product.name,
           store,
+          storeLabel,
           old_price: oldPrice,
           new_price: foundPrice,
           change_percent: Math.round(changePercent * 100) / 100,
           direction,
-          recommendation: direction === 'down'
-            ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`
-            : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`,
+          allPrices,
         });
       }
     }
@@ -201,6 +208,55 @@ Deno.serve(async (req) => {
       const { error } = await supabase.from('price_entries').insert(newPriceEntries);
       if (error) console.error('Error inserting prices:', error);
     }
+
+    // Get AI recommendations for each alert in parallel
+    const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '';
+    const newAlerts = await Promise.all(
+      alertCandidates.map(async (candidate) => {
+        let recommendation = candidate.direction === 'down'
+          ? `📉 Baisse de ${Math.abs(candidate.change_percent).toFixed(1)}% chez ${candidate.storeLabel}.`
+          : `📈 Hausse de ${candidate.change_percent.toFixed(1)}% chez ${candidate.storeLabel}.`;
+
+        try {
+          const aiResponse = await fetch(`${SUPABASE_URL}/functions/v1/ai-recommendation`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+              productName: candidate.product_name,
+              store: candidate.storeLabel,
+              oldPrice: candidate.old_price,
+              newPrice: candidate.new_price,
+              changePercent: candidate.change_percent,
+              direction: candidate.direction,
+              allPrices: candidate.allPrices,
+            }),
+          });
+
+          if (aiResponse.ok) {
+            const aiData = await aiResponse.json();
+            if (aiData.recommendation) {
+              recommendation = aiData.recommendation;
+            }
+          }
+        } catch (aiErr) {
+          console.error('AI recommendation failed:', aiErr);
+        }
+
+        return {
+          product_id: candidate.product_id,
+          product_name: candidate.product_name,
+          store: candidate.store,
+          old_price: candidate.old_price,
+          new_price: candidate.new_price,
+          change_percent: candidate.change_percent,
+          direction: candidate.direction,
+          recommendation,
+        };
+      })
+    );
 
     if (newAlerts.length > 0) {
       const { error } = await supabase.from('price_alerts').insert(newAlerts);
