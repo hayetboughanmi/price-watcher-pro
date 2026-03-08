@@ -167,13 +167,13 @@ Deno.serve(async (req) => {
 
           // Try to extract price from results — combine all content for better context
           let foundPrice: number | null = null;
-          for (const result of results) {
-            foundPrice = await extractPriceWithAI(result.content, result.title, product.name, store);
-            if (foundPrice) break;
-          }
+          // Combine all results content for better extraction
+          const allContent = results.map(r => `${r.title} ${r.content}`).join('\n');
+          const allTitles = results.map(r => r.title).join(' | ');
+          foundPrice = extractPrice(allContent, allTitles, product.name);
 
-          // Add delay between store checks to avoid rate limiting
-          await sleep(2000);
+          // Add delay between store checks
+          await sleep(1000);
 
           if (foundPrice) {
             newPriceEntries.push({
