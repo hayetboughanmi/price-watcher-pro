@@ -261,6 +261,41 @@ Deno.serve(async (req) => {
     if (newAlerts.length > 0) {
       const { error } = await supabase.from('price_alerts').insert(newAlerts);
       if (error) console.error('Error inserting alerts:', error);
+
+      // Send email notification with alerts + recommendations
+      try {
+        const NOTIFICATION_EMAIL = Deno.env.get('NOTIFICATION_EMAIL');
+        if (NOTIFICATION_EMAIL) {
+          const emailAlerts = newAlerts.map(a => ({
+            productName: a.product_name,
+            store: a.store,
+            oldPrice: a.old_price,
+            newPrice: a.new_price,
+            changePercent: a.change_percent,
+            direction: a.direction,
+            recommendation: a.recommendation,
+          }));
+
+          const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ alerts: emailAlerts, to: NOTIFICATION_EMAIL }),
+          });
+
+          if (emailRes.ok) {
+            console.log('Email notification sent successfully');
+          } else {
+            console.error('Email notification failed:', await emailRes.text());
+          }
+        } else {
+          console.log('No NOTIFICATION_EMAIL configured, skipping email');
+        }
+      } catch (emailErr) {
+        console.error('Email notification error:', emailErr);
+      }
     }
 
     const { data: monitoringRows } = await supabase
