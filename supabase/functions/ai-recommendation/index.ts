@@ -57,6 +57,8 @@ async function callChatCompletion({
     });
 
     if (response.status === 429) {
+      const errBody = await response.text();
+      console.error(`${provider} 429 rate-limited. Body:`, errBody);
       const retryAfterHeader = response.headers.get("retry-after");
       const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
       const waitMs = Number.isFinite(retryAfterSeconds)
