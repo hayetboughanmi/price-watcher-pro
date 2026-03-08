@@ -20,11 +20,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Lovable Cloud uses this gateway (auto-configured)
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-
-// VS Code / Local: Replace with OpenAI direct URL
-// const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
