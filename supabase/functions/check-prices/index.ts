@@ -29,61 +29,85 @@ interface TavilyResult {
   title: string;
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function extractPriceWithAI(content: string, title: string, productName: string, storeName: string): Promise<number | null> {
   // First try regex for obvious prices
   const regexPrice = extractPriceRegex(content, title);
-  if (regexPrice) return regexPrice;
+  if (regexPrice) {
+    console.log(`Regex found price for ${productName} at ${storeName}: ${regexPrice}`);
+    return regexPrice;
+  }
 
-  // Fallback to AI extraction
+  // Fallback to AI extraction with retry on 429
   try {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) return null;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
-        messages: [
-          { role: 'system', content: 'Extract the selling price in TND (Tunisian Dinar) for the specified product from the given text. Return ONLY the numeric price (e.g. 4299). If you cannot find the exact price, return "null". Do NOT return model numbers, storage sizes, or other numbers — only the actual selling price.' },
-          { role: 'user', content: `Product: ${productName}\nStore: ${storeName}\nTitle: ${title}\nContent: ${content.substring(0, 1500)}\n\nWhat is the selling price in TND?` },
-        ],
-        tools: [{
-          type: 'function',
-          function: {
-            name: 'extract_price',
-            description: 'Extract the product price in TND',
-            parameters: {
-              type: 'object',
-              properties: {
-                price: { type: 'number', description: 'The selling price in TND, or null if not found' },
-                confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in the extracted price' },
+    let retries = 0;
+    const maxRetries = 3;
+    
+    while (retries < maxRetries) {
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash-lite',
+          messages: [
+            { role: 'system', content: 'Extract the selling price in TND (Tunisian Dinar) for the specified product from the given text. Return ONLY the numeric price (e.g. 4299). If you cannot find the exact price, return "null". Do NOT return model numbers, storage sizes, or other numbers — only the actual selling price.' },
+            { role: 'user', content: `Product: ${productName}\nStore: ${storeName}\nTitle: ${title}\nContent: ${content.substring(0, 1500)}\n\nWhat is the selling price in TND?` },
+          ],
+          tools: [{
+            type: 'function',
+            function: {
+              name: 'extract_price',
+              description: 'Extract the product price in TND',
+              parameters: {
+                type: 'object',
+                properties: {
+                  price: { type: 'number', description: 'The selling price in TND, or null if not found' },
+                  confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in the extracted price' },
+                },
+                required: ['price', 'confidence'],
+                additionalProperties: false,
               },
-              required: ['price', 'confidence'],
-              additionalProperties: false,
             },
-          },
-        }],
-        tool_choice: { type: 'function', function: { name: 'extract_price' } },
-      }),
-    });
+          }],
+          tool_choice: { type: 'function', function: { name: 'extract_price' } },
+        }),
+      });
 
-    if (!response.ok) {
-      console.error('AI price extraction error:', response.status);
+      if (response.status === 429) {
+        retries++;
+        console.log(`Rate limited, retry ${retries}/${maxRetries} after delay...`);
+        await sleep(3000 * retries); // exponential backoff: 3s, 6s, 9s
+        continue;
+      }
+
+      if (!response.ok) {
+        console.error('AI price extraction error:', response.status);
+        const text = await response.text();
+        console.error('Response:', text);
+        return null;
+      }
+
+      const data = await response.json();
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall) {
+        const args = JSON.parse(toolCall.function.arguments);
+        if (args.price && args.confidence !== 'low' && args.price >= 100 && args.price < 50000) {
+          console.log(`AI found price for ${productName} at ${storeName}: ${args.price} (${args.confidence})`);
+          return Math.round(args.price * 100) / 100;
+        }
+      }
       return null;
     }
-
-    const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (toolCall) {
-      const args = JSON.parse(toolCall.function.arguments);
-      if (args.price && args.confidence !== 'low' && args.price >= 1000 && args.price < 50000) {
-        return Math.round(args.price * 100) / 100;
-      }
-    }
+    console.error('Max retries exceeded for AI extraction');
   } catch (e) {
     console.error('AI extraction failed:', e);
   }
