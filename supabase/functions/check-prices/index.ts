@@ -93,45 +93,6 @@ function extractPrice(content: string, title: string, productName: string): numb
   return null;
 }
 
-function extractPriceRegex(content: string, title: string): number | null {
-  const textToSearch = `${title} ${content}`;
-  
-  const patterns = [
-    // Prices with currency markers: 4 299,000 DT or 4299 TND
-    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC|دينار)\b/gi,
-    // Prix: 4299 or Prix: 4 299
-    /(?:prix|price|tarif|سعر)\s*:?\s*(\d[\d\s.,]*\d)/gi,
-    // Price in common e-commerce formats: 4,299.000 or 4.299,000
-    /(\d{1,2}[.,]\d{3}[.,]\d{3})/g,
-    // Simple 4-digit+ numbers near price context
-    /(?:prix|price|اسعار|promo)\s*[:\-]?\s*(\d{3,6}(?:[.,]\d{1,3})?)/gi,
-  ];
-
-  const candidates: number[] = [];
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(textToSearch)) !== null) {
-      let priceStr = match[1].replace(/\s/g, '');
-      // Handle Tunisian format: 4.299,000 → 4299
-      if (/^\d{1,3}\.\d{3}/.test(priceStr)) {
-        priceStr = priceStr.replace(/\./g, '');
-      }
-      priceStr = priceStr.replace(',', '.');
-      priceStr = priceStr.replace(/\.0{3}$/, '');
-      const price = parseFloat(priceStr);
-      if (price >= 100 && price < 50000) {
-        candidates.push(price);
-      }
-    }
-  }
-  
-  if (candidates.length > 0) {
-    // Return the most common price, or the median
-    candidates.sort((a, b) => a - b);
-    return Math.round(candidates[Math.floor(candidates.length / 2)] * 100) / 100;
-  }
-  return null;
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
