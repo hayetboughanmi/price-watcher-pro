@@ -60,83 +60,81 @@ async function scrapeWithFirecrawl(
   }
 }
 
-// ── AI: extract the exact price from page content ──
+// ── AI: extract the exact price from page content (with retry) ──
 async function extractPriceWithAI(
   content: string,
   productName: string,
   storeName: string,
   apiKey: string,
 ): Promise<number | null> {
-  try {
-    const truncated = content.slice(0, 60000);
+  const truncated = content.slice(0, 40000); // Reduced for speed
+  const maxRetries = 3;
 
-    const response = await fetch(LOVABLE_AI_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-5-mini",
-        messages: [
-          {
-            role: "system",
-            content: `Tu es un extracteur de prix e-commerce ultra précis pour des sites tunisiens.
-On te donne le contenu d'une page web et un produit recherché.
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(LOVABLE_AI_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          messages: [
+            {
+              role: "system",
+              content: `Tu es un extracteur de prix. Trouve le prix TND du SMARTPHONE exact demandé.
+Règles: 128go=128Go=128GB. Ignore accessoires/coques. Ignore modèles différents (iPhone 16 ≠ 16 Pro).
+Réponse: nombre uniquement (ex: 2899) ou NOT_FOUND.`,
+            },
+            {
+              role: "user",
+              content: `Produit: "${productName}" | Magasin: ${storeName}\n\nPage:\n${truncated}`,
+            },
+          ],
+          max_completion_tokens: 20,
+        }),
+      });
 
-RÈGLES IMPORTANTES:
-1. Cherche le SMARTPHONE correspondant au produit demandé (pas les accessoires/coques/câbles)
-2. Variantes acceptables: "128go" = "128 go" = "128GB" = "128 Go" (idem autres capacités)
-3. Si le produit exact n'est pas trouvé mais qu'une variante proche existe (couleur différente), utilise ce prix
-4. IGNORE les modèles différents: iPhone 16 ≠ iPhone 16 Pro ≠ iPhone 15
-5. Retourne le prix le moins cher en TND si plusieurs variantes
-6. Format réponse: uniquement le nombre (ex: 2899) ou NOT_FOUND si introuvable
+      if (response.status === 429) {
+        const waitTime = (attempt + 1) * 2000;
+        console.log(`Rate limited, waiting ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        await sleep(waitTime);
+        continue;
+      }
 
-EXEMPLES:
-- Recherche "iPhone 16 128 Go" → trouve "iPhone 16 128 Go Noir à 3299 DT" → réponds "3299"
-- Recherche "iPhone 16 128 Go" → trouve seulement "iPhone 16 Pro 256 Go" → réponds "NOT_FOUND"`,
-          },
-          {
-            role: "user",
-            content: `Produit recherché: "${productName}"
-Magasin: ${storeName}
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`AI error (${response.status}):`, errText);
+        return null;
+      }
 
-Contenu de la page:
-${truncated}`,
-          },
-        ],
-        max_completion_tokens: 30,
-      }),
-    });
+      const data = await response.json();
+      const answer = data.choices?.[0]?.message?.content?.trim() || '';
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`AI extraction error (${response.status}):`, errText);
+      if (answer === 'NOT_FOUND' || !answer) {
+        console.log(`AI: "${productName}" not found on ${storeName}`);
+        return null;
+      }
+
+      const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
+      const price = parseFloat(cleaned);
+
+      if (!isNaN(price) && price >= 100 && price < 50000) {
+        console.log(`AI extracted: ${productName} @ ${storeName}: ${price} TND`);
+        return Math.round(price * 100) / 100;
+      }
+
+      console.log(`AI invalid price for ${productName}: "${answer}"`);
+      return null;
+    } catch (err) {
+      console.error(`AI error for ${productName} @ ${storeName}:`, err);
       return null;
     }
-
-    const data = await response.json();
-    const answer = data.choices?.[0]?.message?.content?.trim() || '';
-
-    if (answer === 'NOT_FOUND' || !answer) {
-      console.log(`AI says product "${productName}" not found on ${storeName}`);
-      return null;
-    }
-
-    const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
-    const price = parseFloat(cleaned);
-
-    if (!isNaN(price) && price >= 100 && price < 50000) {
-      console.log(`AI extracted price for ${productName} @ ${storeName}: ${price} TND`);
-      return Math.round(price * 100) / 100;
-    }
-
-    console.log(`AI returned invalid price for ${productName} @ ${storeName}: "${answer}"`);
-    return null;
-  } catch (err) {
-    console.error(`AI extraction failed for ${productName} @ ${storeName}:`, err);
-    return null;
   }
+
+  console.log(`AI exhausted retries for ${productName} @ ${storeName}`);
+  return null;
 }
 
 // ── Build store search URLs ──
