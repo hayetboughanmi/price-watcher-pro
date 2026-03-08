@@ -231,46 +231,42 @@ Deno.serve(async (req) => {
       for (const result of storeResults) {
         if (result.status !== 'fulfilled' || !result.value.foundPrice) continue;
         const { store, storeLabel, foundPrice } = result.value;
-            newPriceEntries.push({
-              product_id: product.id,
-              store,
-              price: foundPrice,
-              currency: 'TND',
-            });
+        newPriceEntries.push({
+          product_id: product.id,
+          store,
+          price: foundPrice,
+          currency: 'TND',
+        });
 
-            // Check for price change vs previous
-            const { data: lastPrice } = await supabase
-              .from('price_entries')
-              .select('price')
-              .eq('product_id', product.id)
-              .eq('store', store)
-              .order('checked_at', { ascending: false })
-              .limit(1)
-              .single();
+        // Check for price change vs previous
+        const { data: lastPrice } = await supabase
+          .from('price_entries')
+          .select('price')
+          .eq('product_id', product.id)
+          .eq('store', store)
+          .order('checked_at', { ascending: false })
+          .limit(1)
+          .single();
 
-            if (lastPrice && lastPrice.price !== foundPrice) {
-              const oldPrice = Number(lastPrice.price);
-              const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
-              const direction = foundPrice < oldPrice ? 'down' : 'up';
+        if (lastPrice && lastPrice.price !== foundPrice) {
+          const oldPrice = Number(lastPrice.price);
+          const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
+          const direction = foundPrice < oldPrice ? 'down' : 'up';
 
-              const recommendation = direction === 'down'
-                ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`
-                : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`;
+          const recommendation = direction === 'down'
+            ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`
+            : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`;
 
-              newAlerts.push({
-                product_id: product.id,
-                product_name: product.name,
-                store,
-                old_price: oldPrice,
-                new_price: foundPrice,
-                change_percent: Math.round(changePercent * 100) / 100,
-                direction,
-                recommendation,
-              });
-            }
-          }
-        } catch (storeError) {
-          console.error(`Error checking ${store} for ${product.name}:`, storeError);
+          newAlerts.push({
+            product_id: product.id,
+            product_name: product.name,
+            store,
+            old_price: oldPrice,
+            new_price: foundPrice,
+            change_percent: Math.round(changePercent * 100) / 100,
+            direction,
+            recommendation,
+          });
         }
       }
     }
