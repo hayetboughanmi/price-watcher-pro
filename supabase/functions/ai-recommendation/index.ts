@@ -1,8 +1,6 @@
 // =============================================================================
 // AI Recommendation Edge Function for Mytek Price Monitoring
 // =============================================================================
-// Uses OpenAI API directly with OPENAI_API_KEY secret
-// =============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
@@ -12,6 +10,90 @@ const corsHeaders = {
 };
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_MODEL = "gpt-4o-mini";
+const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const LOVABLE_MODEL = "google/gemini-3-flash-preview";
+const MAX_RETRIES = 0; // fail fast on OpenAI and fallback to Lovable AI
+
+type AIResult = { recommendation: string | null; error?: string; provider?: "openai" | "lovable" };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function fallbackRecommendation(direction: string, changePercent: number, store: string) {
+  return `📊 ${direction === "down" ? "Baisse" : "Hausse"} de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. Vérifiez votre positionnement prix.`;
+}
+
+async function callChatCompletion({
+  url,
+  apiKey,
+  model,
+  systemPrompt,
+  userPrompt,
+  provider,
+  retries = 0,
+}: {
+  url: string;
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  provider: "openai" | "lovable";
+  retries?: number;
+}): Promise<AIResult> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+
+    if (response.status === 429) {
+      const retryAfterHeader = response.headers.get("retry-after");
+      const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+      const waitMs = Number.isFinite(retryAfterSeconds)
+        ? Math.max(5000, retryAfterSeconds * 1000)
+        : 20000;
+
+      if (attempt < retries) {
+        console.warn(`${provider} rate-limited (attempt ${attempt + 1}/${retries + 1}), retrying in ${waitMs}ms`);
+        await sleep(waitMs);
+        continue;
+      }
+
+      return { recommendation: null, error: `${provider}_rate_limited`, provider };
+    }
+
+    if (response.status === 402) {
+      return { recommendation: null, error: `${provider}_payment_required`, provider };
+    }
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`${provider} error:`, response.status, errText);
+      return { recommendation: null, error: `${provider}_error_${response.status}`, provider };
+    }
+
+    const data = await response.json();
+    const recommendation = data.choices?.[0]?.message?.content?.trim() || null;
+
+    if (recommendation) {
+      return { recommendation, provider };
+    }
+
+    return { recommendation: null, error: `${provider}_empty_response`, provider };
+  }
+
+  return { recommendation: null, error: `${provider}_unknown`, provider };
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -19,15 +101,16 @@ serve(async (req) => {
   try {
     const { productName, store, oldPrice, newPrice, changePercent, direction, allPrices } = await req.json();
 
-    // --- OpenAI Direct ---
-    
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
-    const aiUrl = OPENAI_URL;
+    const openAIKey = Deno.env.get("OPENAI_API_KEY");
+    const lovableAIKey = Deno.env.get("LOVABLE_API_KEY");
 
-    const priceContext = allPrices 
-      ? `Prix actuels chez les concurrents:\n${Object.entries(allPrices).map(([s, p]) => `- ${s}: ${p} TND`).join('\n')}`
-      : '';
+    if (!openAIKey && !lovableAIKey) {
+      throw new Error("Neither OPENAI_API_KEY nor LOVABLE_API_KEY is configured");
+    }
+
+    const priceContext = allPrices
+      ? `Prix actuels chez les concurrents:\n${Object.entries(allPrices).map(([s, p]) => `- ${s}: ${p} TND`).join("\n")}`
+      : "";
 
     const systemPrompt = `Tu es un assistant stratégique pour Mytek, un revendeur de produits tech en Tunisie.
 Tu analyses les prix des concurrents (Tunisianet, Tunisiatech, SpaceNet, Wiki) pour aider Mytek à prendre des décisions de pricing.
@@ -44,68 +127,63 @@ Réponds en français, en 2-3 phrases max. Sois direct et actionnable. Utilise d
 Magasin concurrent: ${store}
 Ancien prix concurrent: ${oldPrice} TND
 Nouveau prix concurrent: ${newPrice} TND
-Variation: ${changePercent > 0 ? '+' : ''}${changePercent.toFixed(1)}%
-Direction: ${direction === 'down' ? 'BAISSE' : 'HAUSSE'}
+Variation: ${changePercent > 0 ? "+" : ""}${changePercent.toFixed(1)}%
+Direction: ${direction === "down" ? "BAISSE" : "HAUSSE"}
 ${priceContext}
 
 Quelle est ta recommandation stratégique pour Mytek ?`;
 
-    const response = await fetch(aiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
-    });
+    const errors: string[] = [];
+    let aiResult: AIResult = { recommendation: null };
 
-    if (response.status === 429) {
-      return new Response(JSON.stringify({ 
-        recommendation: `📊 ${direction === 'down' ? 'Baisse' : 'Hausse'} de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. Vérifiez votre positionnement prix.`,
-        error: "rate_limited" 
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (openAIKey) {
+      aiResult = await callChatCompletion({
+        url: OPENAI_URL,
+        apiKey: openAIKey,
+        model: OPENAI_MODEL,
+        systemPrompt,
+        userPrompt,
+        provider: "openai",
+        retries: MAX_RETRIES,
       });
+
+      if (aiResult.error) errors.push(aiResult.error);
     }
 
-    if (response.status === 402) {
-      return new Response(JSON.stringify({ 
-        recommendation: `📊 ${direction === 'down' ? 'Baisse' : 'Hausse'} de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. Vérifiez votre positionnement prix.`,
-        error: "payment_required" 
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (!aiResult.recommendation && lovableAIKey) {
+      const lovableResult = await callChatCompletion({
+        url: LOVABLE_AI_URL,
+        apiKey: lovableAIKey,
+        model: LOVABLE_MODEL,
+        systemPrompt,
+        userPrompt,
+        provider: "lovable",
+        retries: 1,
       });
+
+      if (lovableResult.error) errors.push(lovableResult.error);
+      if (lovableResult.recommendation) aiResult = lovableResult;
     }
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("AI error:", response.status, errText);
-      throw new Error(`AI gateway error: ${response.status}`);
-    }
+    const hasAIGenerated = Boolean(aiResult.recommendation);
+    const recommendation = aiResult.recommendation || fallbackRecommendation(direction, changePercent, store);
 
-    const data = await response.json();
-    const recommendation = data.choices?.[0]?.message?.content || 
-      `📊 Variation de ${Math.abs(changePercent).toFixed(1)}% détectée chez ${store}.`;
-
-    return new Response(JSON.stringify({ recommendation }), {
+    return new Response(JSON.stringify({
+      recommendation,
+      provider: aiResult.provider || "fallback",
+      ...(!hasAIGenerated && errors.length ? { error: errors.join("|") } : {}),
+    }), {
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-
   } catch (e) {
     console.error("ai-recommendation error:", e);
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       error: e instanceof Error ? e.message : "Unknown error",
-      recommendation: "⚠️ Recommandation IA indisponible. Vérifiez les prix manuellement."
+      recommendation: "⚠️ Recommandation IA indisponible. Vérifiez les prix manuellement.",
+      provider: "fallback",
     }), {
-      status: 200, // Return 200 with fallback so the app doesn't break
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
