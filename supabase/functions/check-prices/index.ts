@@ -157,8 +157,8 @@ Deno.serve(async (req) => {
         try {
           const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
 
-          // Rate limit: wait before each Tavily call
-          await sleep(2000);
+          // Rate limit: small delay between Tavily calls
+          await sleep(500);
 
           const tavilyResponse = await fetch('https://api.tavily.com/search', {
             method: 'POST',
@@ -166,8 +166,8 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               api_key: TAVILY_API_KEY,
               query: searchQuery,
-              search_depth: 'advanced',
-              include_raw_content: true,
+              search_depth: 'basic',
+              include_raw_content: false,
               max_results: 3,
               include_domains: [storeNames[store]],
             }),
