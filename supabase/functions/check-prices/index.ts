@@ -211,52 +211,56 @@ Deno.serve(async (req) => {
 
     // Get AI recommendations for each alert in parallel
     const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '';
-    const newAlerts = await Promise.all(
-      alertCandidates.map(async (candidate) => {
-        let recommendation = candidate.direction === 'down'
-          ? `📉 Baisse de ${Math.abs(candidate.change_percent).toFixed(1)}% chez ${candidate.storeLabel}.`
-          : `📈 Hausse de ${candidate.change_percent.toFixed(1)}% chez ${candidate.storeLabel}.`;
+    // Process AI recommendations sequentially with delay to avoid rate limiting
+    const newAlerts: any[] = [];
+    for (let i = 0; i < alertCandidates.length; i++) {
+      const candidate = alertCandidates[i];
+      let recommendation = candidate.direction === 'down'
+        ? `📉 Baisse de ${Math.abs(candidate.change_percent).toFixed(1)}% chez ${candidate.storeLabel}.`
+        : `📈 Hausse de ${candidate.change_percent.toFixed(1)}% chez ${candidate.storeLabel}.`;
 
-        try {
-          const aiResponse = await fetch(`${SUPABASE_URL}/functions/v1/ai-recommendation`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({
-              productName: candidate.product_name,
-              store: candidate.storeLabel,
-              oldPrice: candidate.old_price,
-              newPrice: candidate.new_price,
-              changePercent: candidate.change_percent,
-              direction: candidate.direction,
-              allPrices: candidate.allPrices,
-            }),
-          });
+      try {
+        // Wait 2s between AI calls to avoid OpenAI rate limiting
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 2000));
 
-          if (aiResponse.ok) {
-            const aiData = await aiResponse.json();
-            if (aiData.recommendation) {
-              recommendation = aiData.recommendation;
-            }
+        const aiResponse = await fetch(`${SUPABASE_URL}/functions/v1/ai-recommendation`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            productName: candidate.product_name,
+            store: candidate.storeLabel,
+            oldPrice: candidate.old_price,
+            newPrice: candidate.new_price,
+            changePercent: candidate.change_percent,
+            direction: candidate.direction,
+            allPrices: candidate.allPrices,
+          }),
+        });
+
+        if (aiResponse.ok) {
+          const aiData = await aiResponse.json();
+          if (aiData.recommendation && !aiData.error) {
+            recommendation = aiData.recommendation;
           }
-        } catch (aiErr) {
-          console.error('AI recommendation failed:', aiErr);
         }
+      } catch (aiErr) {
+        console.error('AI recommendation failed:', aiErr);
+      }
 
-        return {
-          product_id: candidate.product_id,
-          product_name: candidate.product_name,
-          store: candidate.store,
-          old_price: candidate.old_price,
-          new_price: candidate.new_price,
-          change_percent: candidate.change_percent,
-          direction: candidate.direction,
-          recommendation,
-        };
-      })
-    );
+      newAlerts.push({
+        product_id: candidate.product_id,
+        product_name: candidate.product_name,
+        store: candidate.store,
+        old_price: candidate.old_price,
+        new_price: candidate.new_price,
+        change_percent: candidate.change_percent,
+        direction: candidate.direction,
+        recommendation,
+      });
+    }
 
     if (newAlerts.length > 0) {
       const { error } = await supabase.from('price_alerts').insert(newAlerts);
