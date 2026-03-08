@@ -23,7 +23,7 @@ async function extractPriceFromStore(
   productName: string,
   storeName: string,
   apiKey: string,
-): Promise<number | null> {
+): Promise<{ price: number; matchedName: string | null } | null> {
   try {
     const response = await fetch(FIRECRAWL_API_URL, {
       method: 'POST',
