@@ -14,7 +14,145 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      monitoring_status: {
+        Row: {
+          id: string
+          is_auto_monitoring: boolean
+          last_check: string | null
+          next_check: string | null
+          total_checks: number
+        }
+        Insert: {
+          id?: string
+          is_auto_monitoring?: boolean
+          last_check?: string | null
+          next_check?: string | null
+          total_checks?: number
+        }
+        Update: {
+          id?: string
+          is_auto_monitoring?: boolean
+          last_check?: string | null
+          next_check?: string | null
+          total_checks?: number
+        }
+        Relationships: []
+      }
+      price_alerts: {
+        Row: {
+          change_percent: number
+          created_at: string
+          direction: string
+          id: string
+          is_read: boolean
+          new_price: number
+          old_price: number
+          product_id: string
+          product_name: string
+          recommendation: string | null
+          store: string
+        }
+        Insert: {
+          change_percent: number
+          created_at?: string
+          direction: string
+          id?: string
+          is_read?: boolean
+          new_price: number
+          old_price: number
+          product_id: string
+          product_name: string
+          recommendation?: string | null
+          store: string
+        }
+        Update: {
+          change_percent?: number
+          created_at?: string
+          direction?: string
+          id?: string
+          is_read?: boolean
+          new_price?: number
+          old_price?: number
+          product_id?: string
+          product_name?: string
+          recommendation?: string | null
+          store?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_alerts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      price_entries: {
+        Row: {
+          checked_at: string
+          currency: string
+          id: string
+          price: number
+          product_id: string
+          store: string
+        }
+        Insert: {
+          checked_at?: string
+          currency?: string
+          id?: string
+          price: number
+          product_id: string
+          store: string
+        }
+        Update: {
+          checked_at?: string
+          currency?: string
+          id?: string
+          price?: number
+          product_id?: string
+          store?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_entries_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          image_url: string | null
+          is_monitored: boolean
+          name: string
+          urls: Json
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          is_monitored?: boolean
+          name: string
+          urls?: Json
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          is_monitored?: boolean
+          name?: string
+          urls?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
