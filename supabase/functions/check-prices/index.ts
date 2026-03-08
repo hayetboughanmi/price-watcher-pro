@@ -136,6 +136,17 @@ async function extractPriceFromDirectUrl(
   }
 }
 
+function normalizeProductUrl(store: string, url: string): string {
+  if (!url) return url;
+
+  let normalized = url.trim();
+  if (store === 'tunisiatech') {
+    normalized = normalized.replace('://www.tunisiatech.tn', '://tunisiatech.tn');
+  }
+
+  return normalized;
+}
+
 function buildStoreSearchUrl(store: string, productName: string): string | null {
   const query = encodeURIComponent(productName);
 
