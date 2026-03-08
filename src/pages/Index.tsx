@@ -5,6 +5,7 @@ import ProductTable from '@/components/dashboard/ProductTable';
 import AlertsList from '@/components/dashboard/AlertsList';
 import PriceChart from '@/components/dashboard/PriceChart';
 import MonitoringControls from '@/components/dashboard/MonitoringControls';
+import AnalyticsView from '@/components/dashboard/AnalyticsView';
 import AddProductDialog from '@/components/dashboard/AddProductDialog';
 import { useProducts } from '@/hooks/useProducts';
 import { Product } from '@/types';
