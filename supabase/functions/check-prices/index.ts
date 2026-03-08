@@ -37,7 +37,7 @@ async function extractPriceWithAI(
 ): Promise<number | null> {
   try {
     // Truncate content to avoid token limits
-    const truncated = content.slice(0, 8000);
+    const truncated = content.slice(0, 12000);
 
     const response = await fetch(LOVABLE_AI_URL, {
       method: "POST",
@@ -46,15 +46,17 @@ async function extractPriceWithAI(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "openai/gpt-5-mini",
         messages: [
           {
             role: "system",
-            content: `Tu es un extracteur de prix. On te donne le contenu d'une page web d'un magasin tunisien et un nom de produit exact.
-Tu dois trouver le prix de vente actuel (en TND/DT) de CE PRODUIT EXACT (pas un modèle Pro, Plus, ou une autre variante).
-- Si le produit a un prix promotionnel, retourne le prix promo.
-- Si le produit n'existe pas sur cette page, retourne "NOT_FOUND".
-- Retourne UNIQUEMENT le nombre (ex: 2899) ou "NOT_FOUND". Rien d'autre.`,
+            content: `Tu es un extracteur de prix e-commerce ultra strict.
+On te donne le contenu texte d'une page web tunisienne + un produit exact.
+Règles:
+- Retourne le prix en TND/DT du PRODUIT EXACT uniquement (ignore Pro/Plus/Max/autres variantes).
+- Si prix promo existe, retourne le prix promo.
+- Si produit indisponible ou introuvable, retourne NOT_FOUND.
+- Réponse = uniquement un nombre (ex: 2899) ou NOT_FOUND.`,
           },
           {
             role: "user",
@@ -66,7 +68,7 @@ ${truncated}`,
           },
         ],
         temperature: 0,
-        max_tokens: 20,
+        max_tokens: 30,
       }),
     });
 
@@ -84,8 +86,8 @@ ${truncated}`,
       return null;
     }
 
-    // Parse the number
-    const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
+    const cleaned = answer.replace(/[^
+\d.,]/g, '').replace(',', '.');
     const price = parseFloat(cleaned);
 
     if (!isNaN(price) && price >= 100 && price < 50000) {
@@ -97,6 +99,40 @@ ${truncated}`,
     return null;
   } catch (err) {
     console.error(`AI extraction failed for ${productName} @ ${storeName}:`, err);
+    return null;
+  }
+}
+
+async function extractPriceFromDirectUrl(
+  productUrl: string,
+  productName: string,
+  storeName: string,
+  apiKey: string,
+): Promise<number | null> {
+  try {
+    const pageResponse = await fetch(productUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; PriceMonitorBot/1.0)",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+      },
+    });
+
+    if (!pageResponse.ok) {
+      console.log(`Direct URL fetch failed for ${storeName}: ${pageResponse.status}`);
+      return null;
+    }
+
+    const html = await pageResponse.text();
+    const textContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return await extractPriceWithAI(textContent, productName, storeName, apiKey);
+  } catch (err) {
+    console.error(`Direct URL extraction failed for ${productName} @ ${storeName}:`, err);
     return null;
   }
 }
