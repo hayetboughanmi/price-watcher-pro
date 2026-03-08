@@ -19,10 +19,7 @@ serve(async (req) => {
   try {
     const { productName, store, oldPrice, newPrice, changePercent, direction, allPrices } = await req.json();
 
-    // =========================================================================
-    // 🔑 VS CODE / LOCAL: Comment the LOVABLE_API_KEY block below and 
-    //    uncomment the OPENAI_API_KEY block instead
-    // =========================================================================
+    // --- OpenAI Direct ---
     
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
