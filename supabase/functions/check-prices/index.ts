@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
     const results = await Promise.allSettled(
       tasks.map(async ({ product, store, storeLabel }) => {
         const searchUrl = buildStoreSearchUrl(store, product.name);
-        if (!searchUrl) return { product, store, storeLabel, price: null };
+        if (!searchUrl) return { product, store, storeLabel, price: null, matchedName: null };
 
         console.log(`Checking ${product.name} @ ${storeLabel}...`);
         const result = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
