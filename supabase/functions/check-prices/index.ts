@@ -165,6 +165,7 @@ Deno.serve(async (req) => {
         store,
         price: foundPrice,
         currency: 'TND',
+        matched_name: result.value.matchedName || null,
       });
 
       const { data: lastPrice } = await supabase
