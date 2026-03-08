@@ -14,11 +14,11 @@ interface ProductTableProps {
 }
 
 const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProps) => {
-  const getLatestPrice = (productId: string, store: StoreName) => {
+  const getLatestPriceEntry = (productId: string, store: StoreName) => {
     const storePrices = prices
       .filter(p => p.productId === productId && p.store === store)
       .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime());
-    return storePrices[0]?.price;
+    return storePrices[0] || null;
   };
 
   const getBestPrice = (productId: string) => {
