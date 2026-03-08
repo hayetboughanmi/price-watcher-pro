@@ -205,26 +205,28 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Process ALL tasks in parallel (search pages only - direct URLs are unreliable)
-    const allResults = await Promise.allSettled(
+    // Step 1: Scrape ALL pages in parallel with Firecrawl
+    const scrapeResults = await Promise.allSettled(
       tasks.map(async ({ product, store, storeLabel }) => {
         const searchUrl = buildStoreSearchUrl(store, product.name);
-        if (!searchUrl) return { product, store, storeLabel, foundPrice: null };
+        if (!searchUrl) return { product, store, storeLabel, content: null };
 
         console.log(`Scraping ${product.name} @ ${storeLabel}...`);
         const content = await scrapeWithFirecrawl(searchUrl, FIRECRAWL_API_KEY);
-        let foundPrice: number | null = null;
-        if (content) {
-          foundPrice = await extractPriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
-        }
-        console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
-        return { product, store, storeLabel, foundPrice };
+        return { product, store, storeLabel, content };
       })
     );
 
-    for (const result of allResults) {
-      if (result.status !== 'fulfilled' || !result.value.foundPrice) continue;
-      const { product, store, storeLabel, foundPrice } = result.value;
+    // Step 2: Extract prices sequentially with AI (to avoid rate limits)
+    for (const result of scrapeResults) {
+      if (result.status !== 'fulfilled' || !result.value.content) continue;
+      const { product, store, storeLabel, content } = result.value;
+
+      await sleep(500); // Rate limit protection
+      const foundPrice = await extractPriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
+      console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
+
+      if (!foundPrice) continue;
         newPriceEntries.push({
           product_id: product.id,
           store,
