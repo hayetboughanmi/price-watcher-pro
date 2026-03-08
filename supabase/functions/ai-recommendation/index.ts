@@ -13,7 +13,7 @@ const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODEL = "gpt-4o-mini";
 const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const LOVABLE_MODEL = "google/gemini-3-flash-preview";
-const MAX_RETRIES = 2; // total attempts = 3
+const MAX_RETRIES = 0; // fail fast on OpenAI and fallback to Lovable AI
 
 type AIResult = { recommendation: string | null; error?: string; provider?: "openai" | "lovable" };
 
