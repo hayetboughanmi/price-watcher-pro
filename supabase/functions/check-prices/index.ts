@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
 
           console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
 
-          await sleep(800);
+          await sleep(300);
 
           if (foundPrice) {
             newPriceEntries.push({
