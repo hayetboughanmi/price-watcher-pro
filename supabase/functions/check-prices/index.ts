@@ -261,7 +261,6 @@ Deno.serve(async (req) => {
             direction,
             recommendation,
           });
-        }
       }
     }
 
