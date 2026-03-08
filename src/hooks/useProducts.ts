@@ -43,6 +43,7 @@ export function useProducts() {
         price: Number(p.price),
         currency: p.currency,
         checkedAt: p.checked_at,
+        matchedName: p.matched_name || null,
       })));
     }
 
