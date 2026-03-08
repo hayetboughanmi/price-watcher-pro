@@ -1,1 +1,4 @@
 project_id = "xqpcrgolyeaesnrrigwc"
+
+[functions.check-prices]
+verify_jwt = false
