@@ -46,7 +46,7 @@ async function extractPriceWithAI(content: string, title: string, productName: s
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
+        model: 'google/gemini-2.5-flash-lite',
         messages: [
           { role: 'system', content: 'Extract the selling price in TND (Tunisian Dinar) for the specified product from the given text. Return ONLY the numeric price (e.g. 4299). If you cannot find the exact price, return "null". Do NOT return model numbers, storage sizes, or other numbers — only the actual selling price.' },
           { role: 'user', content: `Product: ${productName}\nStore: ${storeName}\nTitle: ${title}\nContent: ${content.substring(0, 1500)}\n\nWhat is the selling price in TND?` },
