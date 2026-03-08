@@ -1,13 +1,5 @@
 // =============================================================================
-// Price Check Edge Function — Tavily + AI Recommendations
-// =============================================================================
-// 
-// 🔑 VS CODE / LOCAL: Set these in your .env file:
-//   TAVILY_API_KEY=tvly-your-tavily-api-key
-//   OPENAI_API_KEY=sk-your-openai-api-key (for AI recommendations)
-//
-// Get Tavily key at: https://tavily.com
-// Get OpenAI key at: https://platform.openai.com/api-keys
+// Price Check Edge Function — Tavily + AI Price Extraction + AI Recommendations
 // =============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -16,6 +8,8 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
 interface Product {
   id: string;
@@ -27,139 +21,82 @@ interface TavilyResult {
   url: string;
   content: string;
   title: string;
+  raw_content?: string;
 }
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
-function isPhoneLikeProduct(productName: string): boolean {
-  return /(iphone|samsung|galaxy|pixel|xiaomi|redmi|oppo|huawei)/i.test(productName);
-}
-
-function extractPrice(
+// Use AI to extract the exact price for a specific product from page content
+async function extractPriceWithAI(
   content: string,
-  title: string,
   productName: string,
-  store?: string,
-  referencePrice?: number | null,
-): number | null {
-  const textToSearch = `${title} ${content}`;
-
-  const patterns = [
-    /(?:prix|price|tarif)?\s*:?[\s\u00a0]*(\d[\d\s.,]*\d)[\s\u00a0]*(?:TND|DT|TTC|دينار)/gi,
-    /(?:TND|DT|TTC|دينار)[\s\u00a0]*(\d[\d\s.,]*\d)/gi,
-    /(\d{1,2}[.,]\d{3}[.,]\d{3})/g,
-    /(\d{1,2}\s?\d{3}(?:[.,]\d{1,3})?)[\s\u00a0]*(?:TND|DT|TTC|dinars?)/gi,
-  ];
-
-  const rawCandidates: number[] = [];
-
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(textToSearch)) !== null) {
-      let priceStr = match[1].replace(/\s/g, '');
-      if (/^\d{1,3}\.\d{3}/.test(priceStr)) {
-        priceStr = priceStr.replace(/\./g, '');
-      }
-      priceStr = priceStr.replace(',', '.');
-      priceStr = priceStr.replace(/\.0{3}$/, '');
-      const price = parseFloat(priceStr);
-      if (price >= 100 && price < 50000 && !isNaN(price)) {
-        rawCandidates.push(price);
-      }
-    }
-  }
-
-  const minPrice = isPhoneLikeProduct(productName) ? 1500 : 100;
-  let candidates = rawCandidates.filter((p) => p >= minPrice);
-
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => a - b);
-    let result = median(candidates);
-
-    if (store === 'tunisiatech' && isPhoneLikeProduct(productName)) {
-      let tunisiatechPool = candidates;
-
-      if (referencePrice && referencePrice > 0) {
-        const closeToMarket = candidates.filter(
-          (p) => p >= referencePrice * 0.6 && p <= referencePrice * 1.5,
-        );
-        if (closeToMarket.length > 0) {
-          tunisiatechPool = closeToMarket;
-        }
-
-        result = tunisiatechPool.reduce((closest, current) =>
-          Math.abs(current - referencePrice) < Math.abs(closest - referencePrice)
-            ? current
-            : closest,
-        tunisiatechPool[0]);
-      } else {
-        result = tunisiatechPool[Math.floor(tunisiatechPool.length * 0.75)];
-      }
-    }
-
-    console.log(`Regex found price for ${productName}: ${result} from ${candidates.length} filtered candidates: [${candidates.join(', ')}]`);
-    return Math.round(result * 100) / 100;
-  }
-
-  if (store === 'tunisiatech' && isPhoneLikeProduct(productName)) {
-    return null;
-  }
-
-  const lastResort = /\b(\d{4,5})\b/g;
-  const nums: number[] = [];
-  let m;
-  while ((m = lastResort.exec(textToSearch)) !== null) {
-    const n = parseInt(m[1]);
-    if (n >= minPrice && n < 50000 && n > 2030) {
-      nums.push(n);
-    }
-  }
-
-  if (nums.length > 0) {
-    nums.sort((a, b) => a - b);
-    console.log(`Last resort price for ${productName}: ${nums[0]} from [${nums.join(', ')}]`);
-    return nums[0];
-  }
-
-  return null;
-}
-
-async function extractPriceFromDirectUrl(
-  url: string,
-  productName: string,
-  store: string,
-  referencePrice?: number | null,
+  storeName: string,
+  apiKey: string,
 ): Promise<number | null> {
   try {
-    const response = await fetch(url, {
+    // Truncate content to avoid token limits
+    const truncated = content.slice(0, 8000);
+
+    const response = await fetch(LOVABLE_AI_URL, {
+      method: "POST",
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; LovablePriceBot/1.0)',
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [
+          {
+            role: "system",
+            content: `Tu es un extracteur de prix. On te donne le contenu d'une page web d'un magasin tunisien et un nom de produit exact.
+Tu dois trouver le prix de vente actuel (en TND/DT) de CE PRODUIT EXACT (pas un modèle Pro, Plus, ou une autre variante).
+- Si le produit a un prix promotionnel, retourne le prix promo.
+- Si le produit n'existe pas sur cette page, retourne "NOT_FOUND".
+- Retourne UNIQUEMENT le nombre (ex: 2899) ou "NOT_FOUND". Rien d'autre.`,
+          },
+          {
+            role: "user",
+            content: `Produit recherché: "${productName}"
+Magasin: ${storeName}
+
+Contenu de la page:
+${truncated}`,
+          },
+        ],
+        temperature: 0,
+        max_tokens: 20,
+      }),
     });
 
-    if (!response.ok) return null;
-
-    const html = await response.text();
-    const textOnly = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ');
-
-    const price = extractPrice(textOnly, '', productName, store, referencePrice);
-    if (price) {
-      console.log(`Direct URL price for ${productName} @ ${store}: ${price}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`AI extraction error (${response.status}):`, errText);
+      return null;
     }
-    return price;
-  } catch (error) {
-    console.error(`Direct URL extraction failed for ${productName} @ ${store}:`, error);
+
+    const data = await response.json();
+    const answer = data.choices?.[0]?.message?.content?.trim() || '';
+
+    if (answer === 'NOT_FOUND' || !answer) {
+      console.log(`AI says product "${productName}" not found on ${storeName}`);
+      return null;
+    }
+
+    // Parse the number
+    const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
+    const price = parseFloat(cleaned);
+
+    if (!isNaN(price) && price >= 100 && price < 50000) {
+      console.log(`AI extracted price for ${productName} @ ${storeName}: ${price} TND`);
+      return Math.round(price * 100) / 100;
+    }
+
+    console.log(`AI returned invalid price for ${productName} @ ${storeName}: "${answer}"`);
+    return null;
+  } catch (err) {
+    console.error(`AI extraction failed for ${productName} @ ${storeName}:`, err);
     return null;
   }
 }
@@ -172,9 +109,10 @@ Deno.serve(async (req) => {
 
   try {
     const TAVILY_API_KEY = Deno.env.get('TAVILY_API_KEY');
-    if (!TAVILY_API_KEY) {
-      throw new Error('TAVILY_API_KEY is not configured');
-    }
+    if (!TAVILY_API_KEY) throw new Error('TAVILY_API_KEY is not configured');
+
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -200,45 +138,34 @@ Deno.serve(async (req) => {
       wiki: 'wiki.tn',
     };
 
+    const storeLabels: Record<string, string> = {
+      tunisianet: 'Tunisianet',
+      tunisiatech: 'Tunisiatech',
+      spacenet: 'SpaceNet',
+      wiki: 'Wiki',
+    };
+
     const newPriceEntries: any[] = [];
     const newAlerts: any[] = [];
 
     for (const product of products as Product[]) {
       const urls = product.urls || {};
 
-      const { data: latestByProduct } = await supabase
-        .from('price_entries')
-        .select('store, price')
-        .eq('product_id', product.id)
-        .order('checked_at', { ascending: false });
-
-      const latestStorePrices: Record<string, number> = {};
-      if (latestByProduct) {
-        for (const row of latestByProduct) {
-          if (latestStorePrices[row.store] === undefined) {
-            latestStorePrices[row.store] = Number(row.price);
-          }
-        }
-      }
-
       for (const [store, url] of Object.entries(urls)) {
         if (!url) continue;
 
         try {
-          // Use Tavily to search for the product price on the specific store
           const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
 
           const tavilyResponse = await fetch('https://api.tavily.com/search', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               api_key: TAVILY_API_KEY,
               query: searchQuery,
               search_depth: 'advanced',
               include_raw_content: true,
-              max_results: 5,
+              max_results: 3,
               include_domains: [storeNames[store]],
             }),
           });
@@ -251,51 +178,29 @@ Deno.serve(async (req) => {
           const tavilyData = await tavilyResponse.json();
           const results: TavilyResult[] = tavilyData.results || [];
 
-          const siblingPrices = Object.entries(latestStorePrices)
-            .filter(([s]) => s !== store)
-            .map(([, p]) => Number(p))
-            .concat(
-              newPriceEntries
-                .filter((entry) => entry.product_id === product.id && entry.store !== store)
-                .map((entry) => Number(entry.price)),
-            );
-
-          const referencePrice = siblingPrices.length > 0 ? median(siblingPrices) : null;
-
-          // Try to extract price from results — combine all content for better context
-          let foundPrice: number | null = null;
-          const allContent = results.map(r => `${r.title} ${(r as any).raw_content || r.content}`).join('\n');
-          const allTitles = results.map(r => r.title).join(' | ');
-          foundPrice = extractPrice(allContent, allTitles, product.name, store, referencePrice);
-
-          const isSuspiciousTunisiatechPrice =
-            store === 'tunisiatech' &&
-            !!foundPrice &&
-            !!referencePrice &&
-            foundPrice < referencePrice * 0.6;
-
-          // Tunisiatech frequently returns listing snippets, so try exact URL extraction if needed
-          if ((store === 'tunisiatech') && (!foundPrice || isSuspiciousTunisiatechPrice)) {
-            foundPrice = await extractPriceFromDirectUrl(url, product.name, store, referencePrice);
+          if (results.length === 0) {
+            console.log(`${product.name} @ ${store}: no Tavily results`);
+            await sleep(500);
+            continue;
           }
 
-          if (
-            store === 'tunisiatech' &&
-            !!foundPrice &&
-            !!referencePrice &&
-            foundPrice < referencePrice * 0.6
-          ) {
-            console.log(`Discarding suspicious Tunisiatech price for ${product.name}: ${foundPrice} (ref: ${referencePrice})`);
-            foundPrice = null;
-          }
+          // Combine content for AI extraction
+          const allContent = results
+            .map(r => `--- ${r.title} ---\n${r.raw_content || r.content}`)
+            .join('\n\n');
 
-          console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'no price found'} (${results.length} results)`);
+          const foundPrice = await extractPriceWithAI(
+            allContent,
+            product.name,
+            storeLabels[store] || store,
+            LOVABLE_API_KEY,
+          );
 
-          // Add delay between store checks
-          await sleep(1000);
+          console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
+
+          await sleep(800);
 
           if (foundPrice) {
-            latestStorePrices[store] = foundPrice;
             newPriceEntries.push({
               product_id: product.id,
               store,
@@ -318,13 +223,13 @@ Deno.serve(async (req) => {
               const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
               const direction = foundPrice < oldPrice ? 'down' : 'up';
 
-              // Get all current prices for this product for AI context
+              // Get all current prices for AI recommendation context
               const { data: allCurrentPrices } = await supabase
                 .from('price_entries')
                 .select('store, price')
                 .eq('product_id', product.id)
                 .order('checked_at', { ascending: false });
-              
+
               const priceMap: Record<string, number> = {};
               if (allCurrentPrices) {
                 for (const p of allCurrentPrices) {
@@ -357,8 +262,8 @@ Deno.serve(async (req) => {
               } catch (aiErr) {
                 console.error('AI recommendation error:', aiErr);
                 recommendation = direction === 'down'
-                  ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. Ancien: ${oldPrice} TND → Nouveau: ${foundPrice} TND.`
-                  : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${store}. ${oldPrice} TND → ${foundPrice} TND.`;
+                  ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. ${oldPrice} → ${foundPrice} TND.`
+                  : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${store}. ${oldPrice} → ${foundPrice} TND.`;
               }
 
               newAlerts.push({
