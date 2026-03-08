@@ -191,49 +191,58 @@ Deno.serve(async (req) => {
         if (!url) continue;
 
         try {
-          const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
+          const storeLabel = storeLabels[store] || store;
+          let foundPrice: number | null = null;
 
-          // Rate limit: small delay between Tavily calls
-          await sleep(500);
-
-          const tavilyResponse = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              api_key: TAVILY_API_KEY,
-              query: searchQuery,
-              search_depth: 'basic',
-              include_raw_content: false,
-              max_results: 3,
-              include_domains: [storeNames[store]],
-            }),
-          });
-
-          if (!tavilyResponse.ok) {
-            console.error(`Tavily error for ${product.name} on ${store}: ${tavilyResponse.status}`);
-            continue;
-          }
-
-          const tavilyData = await tavilyResponse.json();
-          const results: TavilyResult[] = tavilyData.results || [];
-
-          if (results.length === 0) {
-            console.log(`${product.name} @ ${store}: no Tavily results`);
-            await sleep(500);
-            continue;
-          }
-
-          // Combine content for AI extraction
-          const allContent = results
-            .map(r => `--- ${r.title} ---\n${r.raw_content || r.content}`)
-            .join('\n\n');
-
-          const foundPrice = await extractPriceWithAI(
-            allContent,
+          // 1) Primary path: use exact product URL for better precision and no Tavily dependency
+          foundPrice = await extractPriceFromDirectUrl(
+            url,
             product.name,
-            storeLabels[store] || store,
+            storeLabel,
             LOVABLE_API_KEY,
           );
+
+          // 2) Fallback path: Tavily search + AI extraction
+          if (!foundPrice) {
+            const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
+
+            await sleep(400);
+
+            const tavilyResponse = await fetch('https://api.tavily.com/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                api_key: TAVILY_API_KEY,
+                query: searchQuery,
+                search_depth: 'basic',
+                include_raw_content: true,
+                max_results: 5,
+                include_domains: [storeNames[store]],
+              }),
+            });
+
+            if (!tavilyResponse.ok) {
+              console.error(`Tavily error for ${product.name} on ${store}: ${tavilyResponse.status}`);
+            } else {
+              const tavilyData = await tavilyResponse.json();
+              const results: TavilyResult[] = tavilyData.results || [];
+
+              if (results.length === 0) {
+                console.log(`${product.name} @ ${store}: no Tavily results`);
+              } else {
+                const allContent = results
+                  .map(r => `--- ${r.title} ---\n${r.raw_content || r.content}`)
+                  .join('\n\n');
+
+                foundPrice = await extractPriceWithAI(
+                  allContent,
+                  product.name,
+                  storeLabel,
+                  LOVABLE_API_KEY,
+                );
+              }
+            }
+          }
 
           console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
 
