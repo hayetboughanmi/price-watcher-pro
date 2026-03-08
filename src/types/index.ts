@@ -17,6 +17,7 @@ export interface PriceEntry {
   price: number;
   currency: string;
   checkedAt: string;
+  matchedName: string | null;
 }
 
 export interface PriceAlert {

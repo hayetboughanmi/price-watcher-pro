@@ -93,6 +93,7 @@ export type Database = {
           checked_at: string
           currency: string
           id: string
+          matched_name: string | null
           price: number
           product_id: string
           store: string
@@ -101,6 +102,7 @@ export type Database = {
           checked_at?: string
           currency?: string
           id?: string
+          matched_name?: string | null
           price: number
           product_id: string
           store: string
@@ -109,6 +111,7 @@ export type Database = {
           checked_at?: string
           currency?: string
           id?: string
+          matched_name?: string | null
           price?: number
           product_id?: string
           store?: string

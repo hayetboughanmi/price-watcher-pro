@@ -14,11 +14,11 @@ interface ProductTableProps {
 }
 
 const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProps) => {
-  const getLatestPrice = (productId: string, store: StoreName) => {
+  const getLatestPriceEntry = (productId: string, store: StoreName) => {
     const storePrices = prices
       .filter(p => p.productId === productId && p.store === store)
       .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime());
-    return storePrices[0]?.price;
+    return storePrices[0] || null;
   };
 
   const getBestPrice = (productId: string) => {
@@ -74,14 +74,22 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
                     <Badge variant="secondary" className="text-xs">{product.category}</Badge>
                   </TableCell>
                   {(Object.keys(STORE_CONFIG) as StoreName[]).map(store => {
-                    const price = getLatestPrice(product.id, store);
+                    const entry = getLatestPriceEntry(product.id, store);
+                    const price = entry?.price;
                     const isBest = best.store === store && best.price === price;
                     return (
                       <TableCell key={store} className="text-center">
                         {price ? (
-                          <span className={`font-mono text-sm ${isBest ? 'text-success font-bold' : ''}`}>
-                            {price.toLocaleString()} TND
-                          </span>
+                          <div>
+                            {entry?.matchedName && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[120px] mx-auto mb-0.5" title={entry.matchedName}>
+                                {entry.matchedName}
+                              </p>
+                            )}
+                            <span className={`font-mono text-sm ${isBest ? 'text-success font-bold' : ''}`}>
+                              {price.toLocaleString()} TND
+                            </span>
+                          </div>
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
                         )}

@@ -23,7 +23,7 @@ async function extractPriceFromStore(
   productName: string,
   storeName: string,
   apiKey: string,
-): Promise<number | null> {
+): Promise<{ price: number; matchedName: string | null } | null> {
   try {
     const response = await fetch(FIRECRAWL_API_URL, {
       method: 'POST',
@@ -74,7 +74,7 @@ Rules:
     const price = Number(extracted.price);
     if (!isNaN(price) && price >= 100 && price < 50000) {
       console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${extracted.product_matched || 'N/A'})`);
-      return Math.round(price * 100) / 100;
+      return { price: Math.round(price * 100) / 100, matchedName: extracted.product_matched || null };
     }
 
     console.log(`Invalid price from ${storeName}: ${extracted.price}`);
@@ -145,11 +145,11 @@ Deno.serve(async (req) => {
     const results = await Promise.allSettled(
       tasks.map(async ({ product, store, storeLabel }) => {
         const searchUrl = buildStoreSearchUrl(store, product.name);
-        if (!searchUrl) return { product, store, storeLabel, price: null };
+        if (!searchUrl) return { product, store, storeLabel, price: null, matchedName: null };
 
         console.log(`Checking ${product.name} @ ${storeLabel}...`);
-        const price = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
-        return { product, store, storeLabel, price };
+        const result = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
+        return { product, store, storeLabel, price: result?.price || null, matchedName: result?.matchedName || null };
       })
     );
 
@@ -165,6 +165,7 @@ Deno.serve(async (req) => {
         store,
         price: foundPrice,
         currency: 'TND',
+        matched_name: result.value.matchedName || null,
       });
 
       const { data: lastPrice } = await supabase
