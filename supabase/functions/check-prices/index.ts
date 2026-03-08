@@ -29,76 +29,22 @@ interface TavilyResult {
   title: string;
 }
 
-async function extractPriceWithAI(content: string, title: string, productName: string, storeName: string): Promise<number | null> {
-  // First try regex for obvious prices
-  const regexPrice = extractPriceRegex(content, title);
-  if (regexPrice) return regexPrice;
-
-  // Fallback to AI extraction
-  try {
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) return null;
-
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite',
-        messages: [
-          { role: 'system', content: 'Extract the selling price in TND (Tunisian Dinar) for the specified product from the given text. Return ONLY the numeric price (e.g. 4299). If you cannot find the exact price, return "null". Do NOT return model numbers, storage sizes, or other numbers — only the actual selling price.' },
-          { role: 'user', content: `Product: ${productName}\nStore: ${storeName}\nTitle: ${title}\nContent: ${content.substring(0, 1500)}\n\nWhat is the selling price in TND?` },
-        ],
-        tools: [{
-          type: 'function',
-          function: {
-            name: 'extract_price',
-            description: 'Extract the product price in TND',
-            parameters: {
-              type: 'object',
-              properties: {
-                price: { type: 'number', description: 'The selling price in TND, or null if not found' },
-                confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in the extracted price' },
-              },
-              required: ['price', 'confidence'],
-              additionalProperties: false,
-            },
-          },
-        }],
-        tool_choice: { type: 'function', function: { name: 'extract_price' } },
-      }),
-    });
-
-    if (!response.ok) {
-      console.error('AI price extraction error:', response.status);
-      return null;
-    }
-
-    const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (toolCall) {
-      const args = JSON.parse(toolCall.function.arguments);
-      if (args.price && args.confidence !== 'low' && args.price >= 1000 && args.price < 50000) {
-        return Math.round(args.price * 100) / 100;
-      }
-    }
-  } catch (e) {
-    console.error('AI extraction failed:', e);
-  }
-  return null;
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function extractPriceRegex(content: string, title: string): number | null {
+function extractPrice(content: string, title: string, productName: string): number | null {
   const textToSearch = `${title} ${content}`;
   
-  // Match prices with currency markers — require at least 4 digits total for electronics
   const patterns = [
-    // 4 299,000 DT or 4299.000 DT or 4 299 DT — must have 4+ digit value
-    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC)\b/gi,
-    // Prix: 4299 TND
-    /(?:prix|price|tarif)\s*:?\s*(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC)/gi,
+    // Prices with currency markers: 4 299,000 DT or 4299 TND
+    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC|دينار)/gi,
+    // Prix: 4299 or Prix: 4 299,000
+    /(?:prix|price|tarif)\s*:?\s*(\d[\d\s.,]*\d)/gi,
+    // Common e-commerce: 4.299,000 or 4,299.000
+    /(\d{1,2}[.,]\d{3}[.,]\d{3})/g,
+    // Numbers that look like prices (4 digits+) near product context
+    /(\d{1,2}\s?\d{3}(?:[.,]\d{1,3})?)\s*(?:TND|DT|TTC|dinars?)/gi,
   ];
 
   const candidates: number[] = [];
@@ -108,24 +54,45 @@ function extractPriceRegex(content: string, title: string): number | null {
       let priceStr = match[1].replace(/\s/g, '');
       // Handle Tunisian format: 4.299,000 → 4299
       if (/^\d{1,3}\.\d{3}/.test(priceStr)) {
-        priceStr = priceStr.replace('.', '');
+        priceStr = priceStr.replace(/\./g, '');
       }
       priceStr = priceStr.replace(',', '.');
       priceStr = priceStr.replace(/\.0{3}$/, '');
       const price = parseFloat(priceStr);
-      // Electronics in Tunisia cost at least 1000 TND for phones/laptops
-      if (price >= 1000 && price < 50000) {
+      if (price >= 100 && price < 50000 && !isNaN(price)) {
         candidates.push(price);
       }
     }
   }
   
   if (candidates.length > 0) {
-    candidates.sort((a, b) => b - a);
-    return Math.round(candidates[0] * 100) / 100;
+    // Return median price
+    candidates.sort((a, b) => a - b);
+    const result = candidates[Math.floor(candidates.length / 2)];
+    console.log(`Regex found price for ${productName}: ${result} from ${candidates.length} candidates: [${candidates.join(', ')}]`);
+    return Math.round(result * 100) / 100;
   }
+  
+  // Last resort: try to find any 4-digit number in the content
+  const lastResort = /\b(\d{4,5})\b/g;
+  const nums: number[] = [];
+  let m;
+  while ((m = lastResort.exec(textToSearch)) !== null) {
+    const n = parseInt(m[1]);
+    // Filter out years, model numbers etc
+    if (n >= 500 && n < 50000 && n > 2030) { // avoid years
+      nums.push(n);
+    }
+  }
+  if (nums.length > 0) {
+    nums.sort((a, b) => a - b);
+    console.log(`Last resort price for ${productName}: ${nums[0]} from [${nums.join(', ')}]`);
+    return nums[0];
+  }
+  
   return null;
 }
+
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -183,9 +150,9 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               api_key: TAVILY_API_KEY,
               query: searchQuery,
-              search_depth: 'basic',
-              include_raw_content: false,
-              max_results: 3,
+              search_depth: 'advanced',
+              include_raw_content: true,
+              max_results: 5,
               include_domains: [storeNames[store]],
             }),
           });
@@ -200,10 +167,14 @@ Deno.serve(async (req) => {
 
           // Try to extract price from results — combine all content for better context
           let foundPrice: number | null = null;
-          for (const result of results) {
-            foundPrice = await extractPriceWithAI(result.content, result.title, product.name, store);
-            if (foundPrice) break;
-          }
+          // Combine all results content (prefer raw_content for full page data)
+          const allContent = results.map(r => `${r.title} ${(r as any).raw_content || r.content}`).join('\n');
+          const allTitles = results.map(r => r.title).join(' | ');
+          foundPrice = extractPrice(allContent, allTitles, product.name);
+          console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'no price found'} (${results.length} results)`);
+
+          // Add delay between store checks
+          await sleep(1000);
 
           if (foundPrice) {
             newPriceEntries.push({
