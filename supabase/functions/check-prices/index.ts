@@ -1,5 +1,5 @@
 // =============================================================================
-// Price Check Edge Function — Firecrawl Scrape + AI Price Extraction
+// Price Check Edge Function — Firecrawl JSON Extraction (no separate AI call)
 // =============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -9,7 +9,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const FIRECRAWL_API_URL = "https://api.firecrawl.dev/v1/scrape";
 
 interface Product {
@@ -18,15 +17,13 @@ interface Product {
   urls: Record<string, string>;
 }
 
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// ── Firecrawl: scrape a URL and return markdown content ──
-async function scrapeWithFirecrawl(
+// ── Firecrawl: scrape + extract price via LLM-powered JSON extraction ──
+async function extractPriceFromStore(
   url: string,
+  productName: string,
+  storeName: string,
   apiKey: string,
-): Promise<string | null> {
+): Promise<number | null> {
   try {
     const response = await fetch(FIRECRAWL_API_URL, {
       method: 'POST',
@@ -36,105 +33,58 @@ async function scrapeWithFirecrawl(
       },
       body: JSON.stringify({
         url,
-        formats: ['markdown'],
+        formats: [
+          {
+            type: 'json',
+            prompt: `Find the price in TND (Tunisian Dinar) for the smartphone "${productName}" on this page.
+Rules:
+- Only match the EXACT model (iPhone 16 ≠ iPhone 16 Pro ≠ iPhone 15)
+- 128go = 128 Go = 128GB (same for other capacities)
+- Ignore accessories, cases, cables
+- If promo price exists, return the promo price
+- If multiple color variants exist, return the cheapest
+- Return null if the exact product is not found`,
+            schema: {
+              type: 'object',
+              properties: {
+                price: { type: 'number', description: 'Price in TND, or null if not found' },
+                found: { type: 'boolean', description: 'Whether the exact product was found' },
+                product_matched: { type: 'string', description: 'Name of the product matched' },
+              },
+              required: ['price', 'found'],
+            },
+          },
+        ],
         onlyMainContent: true,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`Firecrawl error (${response.status}) for ${url}:`, errText);
+      console.error(`Firecrawl error (${response.status}) for ${storeName}:`, errText);
       return null;
     }
 
     const data = await response.json();
-    const markdown = data.data?.markdown || data.markdown || '';
-    if (!markdown) {
-      console.log(`Firecrawl returned empty content for ${url}`);
+    const extracted = data.data?.json || data.json;
+
+    if (!extracted || !extracted.found || !extracted.price) {
+      console.log(`${productName} not found on ${storeName}`);
       return null;
     }
-    return markdown;
+
+    const price = Number(extracted.price);
+    if (!isNaN(price) && price >= 100 && price < 50000) {
+      console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${extracted.product_matched || 'N/A'})`);
+      return Math.round(price * 100) / 100;
+    }
+
+    console.log(`Invalid price from ${storeName}: ${extracted.price}`);
+    return null;
   } catch (err) {
-    console.error(`Firecrawl scrape failed for ${url}:`, err);
+    console.error(`Extraction failed for ${productName} @ ${storeName}:`, err);
     return null;
   }
-}
-
-// ── AI: extract the exact price from page content (with retry) ──
-async function extractPriceWithAI(
-  content: string,
-  productName: string,
-  storeName: string,
-  apiKey: string,
-): Promise<number | null> {
-  const truncated = content.slice(0, 40000); // Reduced for speed
-  const maxRetries = 3;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const response = await fetch(LOVABLE_AI_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash-lite",
-          messages: [
-            {
-              role: "system",
-              content: `Tu es un extracteur de prix. Trouve le prix TND du SMARTPHONE exact demandé.
-Règles: 128go=128Go=128GB. Ignore accessoires/coques. Ignore modèles différents (iPhone 16 ≠ 16 Pro).
-Réponse: nombre uniquement (ex: 2899) ou NOT_FOUND.`,
-            },
-            {
-              role: "user",
-              content: `Produit: "${productName}" | Magasin: ${storeName}\n\nPage:\n${truncated}`,
-            },
-          ],
-          max_completion_tokens: 20,
-        }),
-      });
-
-      if (response.status === 429) {
-        const waitTime = (attempt + 1) * 2000;
-        console.log(`Rate limited, waiting ${waitTime}ms (attempt ${attempt + 1}/${maxRetries})...`);
-        await sleep(waitTime);
-        continue;
-      }
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error(`AI error (${response.status}):`, errText);
-        return null;
-      }
-
-      const data = await response.json();
-      const answer = data.choices?.[0]?.message?.content?.trim() || '';
-
-      if (answer === 'NOT_FOUND' || !answer) {
-        console.log(`AI: "${productName}" not found on ${storeName}`);
-        return null;
-      }
-
-      const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
-      const price = parseFloat(cleaned);
-
-      if (!isNaN(price) && price >= 100 && price < 50000) {
-        console.log(`AI extracted: ${productName} @ ${storeName}: ${price} TND`);
-        return Math.round(price * 100) / 100;
-      }
-
-      console.log(`AI invalid price for ${productName}: "${answer}"`);
-      return null;
-    } catch (err) {
-      console.error(`AI error for ${productName} @ ${storeName}:`, err);
-      return null;
-    }
-  }
-
-  console.log(`AI exhausted retries for ${productName} @ ${storeName}`);
-  return null;
 }
 
 // ── Build store search URLs ──
@@ -161,14 +111,10 @@ Deno.serve(async (req) => {
     const FIRECRAWL_API_KEY = Deno.env.get('FIRECRAWL_API_KEY');
     if (!FIRECRAWL_API_KEY) throw new Error('FIRECRAWL_API_KEY is not configured');
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
-
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Get all monitored products
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('*')
@@ -188,95 +134,80 @@ Deno.serve(async (req) => {
       wiki: 'Wiki',
     };
 
-    const newPriceEntries: any[] = [];
-    const newAlerts: any[] = [];
-
-    // Build all scrape tasks across all products and stores
-    type ScrapeTask = { product: Product; store: string; storeLabel: string };
-    const tasks: ScrapeTask[] = [];
-
+    // Build all tasks
+    type Task = { product: Product; store: string; storeLabel: string };
+    const tasks: Task[] = [];
     for (const product of products as Product[]) {
-      const urls = product.urls || {};
-      for (const [store, url] of Object.entries(urls)) {
-        if (!url) continue;
+      for (const [store] of Object.entries(product.urls || {})) {
         tasks.push({ product, store, storeLabel: storeLabels[store] || store });
       }
     }
 
-    // Step 1: Scrape ALL pages in parallel with Firecrawl
-    const scrapeResults = await Promise.allSettled(
+    // Process ALL in parallel — each Firecrawl call does scrape + extraction
+    const results = await Promise.allSettled(
       tasks.map(async ({ product, store, storeLabel }) => {
         const searchUrl = buildStoreSearchUrl(store, product.name);
-        if (!searchUrl) return { product, store, storeLabel, content: null };
+        if (!searchUrl) return { product, store, storeLabel, price: null };
 
-        console.log(`Scraping ${product.name} @ ${storeLabel}...`);
-        const content = await scrapeWithFirecrawl(searchUrl, FIRECRAWL_API_KEY);
-        return { product, store, storeLabel, content };
+        console.log(`Checking ${product.name} @ ${storeLabel}...`);
+        const price = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
+        return { product, store, storeLabel, price };
       })
     );
 
-    // Step 2: Extract prices sequentially with AI (to avoid rate limits)
-    for (const result of scrapeResults) {
-      if (result.status !== 'fulfilled' || !result.value.content) continue;
-      const { product, store, storeLabel, content } = result.value;
+    const newPriceEntries: any[] = [];
+    const newAlerts: any[] = [];
 
-      await sleep(1500); // Rate limit protection
-      const foundPrice = await extractPriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
-      console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
+    for (const result of results) {
+      if (result.status !== 'fulfilled' || !result.value.price) continue;
+      const { product, store, storeLabel, price: foundPrice } = result.value;
 
-      if (!foundPrice) continue;
-        newPriceEntries.push({
+      newPriceEntries.push({
+        product_id: product.id,
+        store,
+        price: foundPrice,
+        currency: 'TND',
+      });
+
+      const { data: lastPrice } = await supabase
+        .from('price_entries')
+        .select('price')
+        .eq('product_id', product.id)
+        .eq('store', store)
+        .order('checked_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (lastPrice && lastPrice.price !== foundPrice) {
+        const oldPrice = Number(lastPrice.price);
+        const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
+        const direction = foundPrice < oldPrice ? 'down' : 'up';
+
+        newAlerts.push({
           product_id: product.id,
+          product_name: product.name,
           store,
-          price: foundPrice,
-          currency: 'TND',
-        });
-
-        // Check for price change vs previous
-        const { data: lastPrice } = await supabase
-          .from('price_entries')
-          .select('price')
-          .eq('product_id', product.id)
-          .eq('store', store)
-          .order('checked_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (lastPrice && lastPrice.price !== foundPrice) {
-          const oldPrice = Number(lastPrice.price);
-          const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
-          const direction = foundPrice < oldPrice ? 'down' : 'up';
-
-          const recommendation = direction === 'down'
+          old_price: oldPrice,
+          new_price: foundPrice,
+          change_percent: Math.round(changePercent * 100) / 100,
+          direction,
+          recommendation: direction === 'down'
             ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`
-            : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`;
-
-          newAlerts.push({
-            product_id: product.id,
-            product_name: product.name,
-            store,
-            old_price: oldPrice,
-            new_price: foundPrice,
-            change_percent: Math.round(changePercent * 100) / 100,
-            direction,
-            recommendation,
-          });
+            : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`,
+        });
       }
     }
 
-    // Insert new price entries
     if (newPriceEntries.length > 0) {
-      const { error: insertError } = await supabase.from('price_entries').insert(newPriceEntries);
-      if (insertError) console.error('Error inserting prices:', insertError);
+      const { error } = await supabase.from('price_entries').insert(newPriceEntries);
+      if (error) console.error('Error inserting prices:', error);
     }
 
-    // Insert new alerts
     if (newAlerts.length > 0) {
-      const { error: alertError } = await supabase.from('price_alerts').insert(newAlerts);
-      if (alertError) console.error('Error inserting alerts:', alertError);
+      const { error } = await supabase.from('price_alerts').insert(newAlerts);
+      if (error) console.error('Error inserting alerts:', error);
     }
 
-    // Update monitoring status
     const { data: monitoringRows } = await supabase
       .from('monitoring_status')
       .select('id, total_checks')
@@ -284,14 +215,11 @@ Deno.serve(async (req) => {
       .single();
 
     if (monitoringRows) {
-      await supabase
-        .from('monitoring_status')
-        .update({
-          last_check: new Date().toISOString(),
-          next_check: new Date(Date.now() + 3600000).toISOString(),
-          total_checks: (monitoringRows.total_checks || 0) + 1,
-        })
-        .eq('id', monitoringRows.id);
+      await supabase.from('monitoring_status').update({
+        last_check: new Date().toISOString(),
+        next_check: new Date(Date.now() + 3600000).toISOString(),
+        total_checks: (monitoringRows.total_checks || 0) + 1,
+      }).eq('id', monitoringRows.id);
     }
 
     return new Response(JSON.stringify({
