@@ -220,8 +220,8 @@ Deno.serve(async (req) => {
         : `📈 Hausse de ${candidate.change_percent.toFixed(1)}% chez ${candidate.storeLabel}.`;
 
       try {
-        // Wait 2s between AI calls to avoid OpenAI rate limiting
-        if (i > 0) await new Promise(resolve => setTimeout(resolve, 2000));
+        // Wait 25s between AI calls to respect OpenAI free tier (3 RPM)
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 25000));
 
         const aiResponse = await fetch(`${SUPABASE_URL}/functions/v1/ai-recommendation`, {
           method: 'POST',
