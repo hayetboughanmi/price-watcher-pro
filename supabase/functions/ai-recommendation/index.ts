@@ -165,12 +165,13 @@ Quelle est ta recommandation stratégique pour Mytek ?`;
       if (lovableResult.recommendation) aiResult = lovableResult;
     }
 
+    const hasAIGenerated = Boolean(aiResult.recommendation);
     const recommendation = aiResult.recommendation || fallbackRecommendation(direction, changePercent, store);
 
     return new Response(JSON.stringify({
       recommendation,
       provider: aiResult.provider || "fallback",
-      ...(errors.length ? { error: errors.join("|") } : {}),
+      ...(!hasAIGenerated && errors.length ? { error: errors.join("|") } : {}),
     }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
