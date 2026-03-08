@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Eye, Trash2 } from 'lucide-react';
 import { Product, PriceEntry, STORE_CONFIG, StoreName } from '@/types';
 import { motion } from 'framer-motion';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 interface ProductTableProps {
   products: Product[];
@@ -45,7 +46,8 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
         <CardTitle className="font-display text-lg">Produits Surveillés</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <Table>
+        <ScrollArea className="w-full">
+        <Table className="min-w-[800px]">
           <TableHeader>
             <TableRow className="border-border/50">
               <TableHead>Produit</TableHead>
@@ -129,6 +131,8 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
             })}
           </TableBody>
         </Table>
+        <ScrollBar orientation="horizontal" />
+        </ScrollArea>
       </CardContent>
     </Card>
   );
