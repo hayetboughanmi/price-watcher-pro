@@ -121,15 +121,8 @@ const Index = () => {
           )}
 
           {activeView === 'analytics' && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              <PriceChart product={selectedProduct || products[0] || null} prices={prices} />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {products.slice(0, 4).map(p => (
-                  <div key={p.id} className="cursor-pointer" onClick={() => handleSelectProduct(p)}>
-                    <PriceChart product={p} prices={prices} />
-                  </div>
-                ))}
-              </div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <AnalyticsView products={products} prices={prices} />
             </motion.div>
           )}
 
