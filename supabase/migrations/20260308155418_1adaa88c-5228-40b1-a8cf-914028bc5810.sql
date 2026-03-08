@@ -1,0 +1,1 @@
+ALTER TABLE public.price_entries ADD COLUMN matched_name text;
