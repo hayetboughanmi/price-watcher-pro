@@ -36,8 +36,8 @@ async function extractPriceWithAI(
   apiKey: string,
 ): Promise<number | null> {
   try {
-    // Truncate content to avoid token limits
-    const truncated = content.slice(0, 8000);
+    // Keep enough content because product grids often appear later in the page
+    const truncated = content.slice(0, 50000);
 
     const response = await fetch(LOVABLE_AI_URL, {
       method: "POST",
@@ -46,15 +46,20 @@ async function extractPriceWithAI(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "openai/gpt-5-mini",
         messages: [
           {
             role: "system",
-            content: `Tu es un extracteur de prix. On te donne le contenu d'une page web d'un magasin tunisien et un nom de produit exact.
-Tu dois trouver le prix de vente actuel (en TND/DT) de CE PRODUIT EXACT (pas un modèle Pro, Plus, ou une autre variante).
-- Si le produit a un prix promotionnel, retourne le prix promo.
-- Si le produit n'existe pas sur cette page, retourne "NOT_FOUND".
-- Retourne UNIQUEMENT le nombre (ex: 2899) ou "NOT_FOUND". Rien d'autre.`,
+            content: `Tu es un extracteur de prix e-commerce ultra strict.
+On te donne le contenu texte d'une page web tunisienne + un produit exact.
+Règles:
+- Retourne le prix en TND/DT du PRODUIT EXACT uniquement.
+- Considère comme équivalents: 128go = 128 go = 128gb (idem pour autres capacités).
+- Ignore les différences mineures de casse, accents, tirets et espaces.
+- Ignore Pro/Plus/Max si ce n'est pas explicitement demandé.
+- Si prix promo existe, retourne le prix promo.
+- Si produit indisponible ou introuvable, retourne NOT_FOUND.
+- Réponse = uniquement un nombre (ex: 2899) ou NOT_FOUND.`,
           },
           {
             role: "user",
@@ -65,8 +70,7 @@ Contenu de la page:
 ${truncated}`,
           },
         ],
-        temperature: 0,
-        max_tokens: 20,
+        max_completion_tokens: 30,
       }),
     });
 
@@ -84,7 +88,6 @@ ${truncated}`,
       return null;
     }
 
-    // Parse the number
     const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
     const price = parseFloat(cleaned);
 
@@ -101,6 +104,100 @@ ${truncated}`,
   }
 }
 
+async function extractPriceFromDirectUrl(
+  productUrl: string,
+  productName: string,
+  storeName: string,
+  apiKey: string,
+): Promise<number | null> {
+  try {
+    const pageResponse = await fetch(productUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; PriceMonitorBot/1.0)",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+      },
+    });
+
+    if (!pageResponse.ok) {
+      console.log(`Direct URL fetch failed for ${storeName}: ${pageResponse.status}`);
+      return null;
+    }
+
+    const html = await pageResponse.text();
+    const textContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return await extractPriceWithAI(textContent, productName, storeName, apiKey);
+  } catch (err) {
+    console.error(`Direct URL extraction failed for ${productName} @ ${storeName}:`, err);
+    return null;
+  }
+}
+
+function normalizeProductUrl(store: string, url: string): string {
+  if (!url) return url;
+
+  let normalized = url.trim();
+  if (store === 'tunisiatech') {
+    normalized = normalized.replace('://www.tunisiatech.tn', '://tunisiatech.tn');
+  }
+
+  return normalized;
+}
+
+function buildStoreSearchUrl(store: string, productName: string): string | null {
+  const query = encodeURIComponent(productName);
+
+  const map: Record<string, string> = {
+    tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&orderby=price&orderway=asc&s=${query}&submit_search=`,
+    tunisiatech: `https://tunisiatech.tn/module/prestaadvancesearch/advancesearch?s=${query}`,
+    spacenet: `https://spacenet.tn/catalogsearch/result/?q=${query}`,
+    wiki: `https://www.wiki.tn/catalogsearch/result/?q=${query}`,
+  };
+
+  return map[store] || null;
+}
+
+async function extractPriceFromStoreSearch(
+  store: string,
+  productName: string,
+  storeName: string,
+  apiKey: string,
+): Promise<number | null> {
+  try {
+    const searchUrl = buildStoreSearchUrl(store, productName);
+    if (!searchUrl) return null;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+      },
+    });
+
+    if (!response.ok) {
+      console.log(`Store search fetch failed for ${storeName}: ${response.status}`);
+      return null;
+    }
+
+    const html = await response.text();
+    const textContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return await extractPriceWithAI(textContent, productName, storeName, apiKey);
+  } catch (err) {
+    console.error(`Store search extraction failed for ${productName} @ ${storeName}:`, err);
+    return null;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -155,49 +252,69 @@ Deno.serve(async (req) => {
         if (!url) continue;
 
         try {
-          const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
+          const storeLabel = storeLabels[store] || store;
+          const normalizedUrl = normalizeProductUrl(store, url);
+          let foundPrice: number | null = null;
 
-          // Rate limit: small delay between Tavily calls
-          await sleep(500);
-
-          const tavilyResponse = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              api_key: TAVILY_API_KEY,
-              query: searchQuery,
-              search_depth: 'basic',
-              include_raw_content: false,
-              max_results: 3,
-              include_domains: [storeNames[store]],
-            }),
-          });
-
-          if (!tavilyResponse.ok) {
-            console.error(`Tavily error for ${product.name} on ${store}: ${tavilyResponse.status}`);
-            continue;
-          }
-
-          const tavilyData = await tavilyResponse.json();
-          const results: TavilyResult[] = tavilyData.results || [];
-
-          if (results.length === 0) {
-            console.log(`${product.name} @ ${store}: no Tavily results`);
-            await sleep(500);
-            continue;
-          }
-
-          // Combine content for AI extraction
-          const allContent = results
-            .map(r => `--- ${r.title} ---\n${r.raw_content || r.content}`)
-            .join('\n\n');
-
-          const foundPrice = await extractPriceWithAI(
-            allContent,
+          // 1) Primary path: use exact product URL for better precision and no Tavily dependency
+          foundPrice = await extractPriceFromDirectUrl(
+            normalizedUrl,
             product.name,
-            storeLabels[store] || store,
+            storeLabel,
             LOVABLE_API_KEY,
           );
+
+          // 2) Secondary path: store-native search page (works when product URL is outdated)
+          if (!foundPrice) {
+            foundPrice = await extractPriceFromStoreSearch(
+              store,
+              product.name,
+              storeLabel,
+              LOVABLE_API_KEY,
+            );
+          }
+
+          // 3) Last fallback: Tavily search + AI extraction
+          if (!foundPrice) {
+            const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
+
+            await sleep(400);
+
+            const tavilyResponse = await fetch('https://api.tavily.com/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                api_key: TAVILY_API_KEY,
+                query: searchQuery,
+                search_depth: 'basic',
+                include_raw_content: true,
+                max_results: 5,
+                include_domains: [storeNames[store]],
+              }),
+            });
+
+            if (!tavilyResponse.ok) {
+              console.error(`Tavily error for ${product.name} on ${store}: ${tavilyResponse.status}`);
+            } else {
+              const tavilyData = await tavilyResponse.json();
+              const results: TavilyResult[] = tavilyData.results || [];
+
+              if (results.length === 0) {
+                console.log(`${product.name} @ ${store}: no Tavily results`);
+              } else {
+                const allContent = results
+                  .map(r => `--- ${r.title} ---\n${r.raw_content || r.content}`)
+                  .join('\n\n');
+
+                foundPrice = await extractPriceWithAI(
+                  allContent,
+                  product.name,
+                  storeLabel,
+                  LOVABLE_API_KEY,
+                );
+              }
+            }
+          }
 
           console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
 
