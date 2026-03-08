@@ -38,7 +38,6 @@ async function scrapeWithFirecrawl(
         url,
         formats: ['markdown'],
         onlyMainContent: true,
-        waitFor: 2000,
       }),
     });
 
