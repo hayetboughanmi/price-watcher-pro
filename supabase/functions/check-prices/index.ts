@@ -232,6 +232,9 @@ Deno.serve(async (req) => {
             if (foundPrice) break;
           }
 
+          // Add delay between store checks to avoid rate limiting
+          await sleep(2000);
+
           if (foundPrice) {
             newPriceEntries.push({
               product_id: product.id,
