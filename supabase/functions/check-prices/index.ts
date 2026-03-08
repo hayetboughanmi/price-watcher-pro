@@ -1,5 +1,5 @@
 // =============================================================================
-// Price Check Edge Function — Tavily + AI Price Extraction + AI Recommendations
+// Price Check Edge Function — Firecrawl JSON Extraction (no separate AI call)
 // =============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -9,7 +9,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const FIRECRAWL_API_URL = "https://api.firecrawl.dev/v1/scrape";
 
 interface Product {
   id: string;
@@ -17,149 +17,77 @@ interface Product {
   urls: Record<string, string>;
 }
 
-interface TavilyResult {
-  url: string;
-  content: string;
-  title: string;
-  raw_content?: string;
-}
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Use AI to extract the exact price for a specific product from page content
-async function extractPriceWithAI(
-  content: string,
+// ── Firecrawl: scrape + extract price via LLM-powered JSON extraction ──
+async function extractPriceFromStore(
+  url: string,
   productName: string,
   storeName: string,
   apiKey: string,
 ): Promise<number | null> {
   try {
-    // Keep enough content because product grids often appear later in the page
-    const truncated = content.slice(0, 60000);
-
-    const response = await fetch(LOVABLE_AI_URL, {
-      method: "POST",
+    const response = await fetch(FIRECRAWL_API_URL, {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: "openai/gpt-5-mini",
-        messages: [
-          {
-            role: "system",
-            content: `Tu es un extracteur de prix e-commerce ultra précis pour des sites tunisiens.
-On te donne le contenu d'une page web et un produit recherché.
-
-RÈGLES IMPORTANTES:
-1. Cherche le SMARTPHONE correspondant au produit demandé (pas les accessoires/coques/câbles)
-2. Variantes acceptables: "128go" = "128 go" = "128GB" = "128 Go" (idem autres capacités)
-3. Si le produit exact n'est pas trouvé mais qu'une variante proche existe (couleur différente), utilise ce prix
-4. IGNORE les modèles différents: iPhone 16 ≠ iPhone 16 Pro ≠ iPhone 15
-5. Retourne le prix le moins cher en TND si plusieurs variantes
-6. Format réponse: uniquement le nombre (ex: 2899) ou NOT_FOUND si introuvable
-
-EXEMPLES:
-- Recherche "iPhone 16 128 Go" → trouve "iPhone 16 128 Go Noir à 3299 DT" → réponds "3299"
-- Recherche "iPhone 16 128 Go" → trouve seulement "iPhone 16 Pro 256 Go" → réponds "NOT_FOUND"`,
+        url,
+        formats: ['extract'],
+        extract: {
+          prompt: `Find the price in TND (Tunisian Dinar) for the smartphone "${productName}" on this page.
+Rules:
+- Only match the EXACT model (iPhone 16 ≠ iPhone 16 Pro ≠ iPhone 15)
+- 128go = 128 Go = 128GB (same for other capacities)
+- Ignore accessories, cases, cables
+- If promo price exists, return the promo price
+- If multiple color variants, return the cheapest
+- Return null if the exact product is not found`,
+          schema: {
+            type: 'object',
+            properties: {
+              price: { type: 'number', description: 'Price in TND, or null if not found' },
+              found: { type: 'boolean', description: 'Whether the exact product was found' },
+              product_matched: { type: 'string', description: 'Name of the product matched' },
+            },
+            required: ['price', 'found'],
           },
-          {
-            role: "user",
-            content: `Produit recherché: "${productName}"
-Magasin: ${storeName}
-
-Contenu de la page:
-${truncated}`,
-          },
-        ],
-        max_completion_tokens: 30,
+        },
+        onlyMainContent: true,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`AI extraction error (${response.status}):`, errText);
+      console.error(`Firecrawl error (${response.status}) for ${storeName}:`, errText);
       return null;
     }
 
     const data = await response.json();
-    const answer = data.choices?.[0]?.message?.content?.trim() || '';
+    const extracted = data.data?.extract || data.extract;
 
-    if (answer === 'NOT_FOUND' || !answer) {
-      console.log(`AI says product "${productName}" not found on ${storeName}`);
+    if (!extracted || !extracted.found || !extracted.price) {
+      console.log(`${productName} not found on ${storeName}`);
       return null;
     }
 
-    const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
-    const price = parseFloat(cleaned);
-
+    const price = Number(extracted.price);
     if (!isNaN(price) && price >= 100 && price < 50000) {
-      console.log(`AI extracted price for ${productName} @ ${storeName}: ${price} TND`);
+      console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${extracted.product_matched || 'N/A'})`);
       return Math.round(price * 100) / 100;
     }
 
-    console.log(`AI returned invalid price for ${productName} @ ${storeName}: "${answer}"`);
+    console.log(`Invalid price from ${storeName}: ${extracted.price}`);
     return null;
   } catch (err) {
-    console.error(`AI extraction failed for ${productName} @ ${storeName}:`, err);
+    console.error(`Extraction failed for ${productName} @ ${storeName}:`, err);
     return null;
   }
 }
 
-async function extractPriceFromDirectUrl(
-  productUrl: string,
-  productName: string,
-  storeName: string,
-  apiKey: string,
-): Promise<number | null> {
-  try {
-    const pageResponse = await fetch(productUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; PriceMonitorBot/1.0)",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-    });
-
-    if (!pageResponse.ok) {
-      console.log(`Direct URL fetch failed for ${storeName}: ${pageResponse.status}`);
-      return null;
-    }
-
-    const html = await pageResponse.text();
-    const textContent = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return await extractPriceWithAI(textContent, productName, storeName, apiKey);
-  } catch (err) {
-    console.error(`Direct URL extraction failed for ${productName} @ ${storeName}:`, err);
-    return null;
-  }
-}
-
-function normalizeProductUrl(store: string, url: string): string {
-  if (!url) return url;
-
-  let normalized = url.trim();
-  if (store === 'tunisiatech') {
-    normalized = normalized.replace('://www.tunisiatech.tn', '://tunisiatech.tn');
-  }
-
-  return normalized;
-}
-
+// ── Build store search URLs ──
 function buildStoreSearchUrl(store: string, productName: string): string | null {
-  // Simplify product name for better search: remove "GO" variations
-  const simplifiedName = productName
-    .replace(/\s*(GO|Go|go|GB|Gb|gb)\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const query = encodeURIComponent(simplifiedName);
+  const query = encodeURIComponent(productName);
 
   const map: Record<string, string> = {
     tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&s=${query}&submit_search=`,
@@ -171,60 +99,20 @@ function buildStoreSearchUrl(store: string, productName: string): string | null 
   return map[store] || null;
 }
 
-async function extractPriceFromStoreSearch(
-  store: string,
-  productName: string,
-  storeName: string,
-  apiKey: string,
-): Promise<number | null> {
-  try {
-    const searchUrl = buildStoreSearchUrl(store, productName);
-    if (!searchUrl) return null;
-
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-    });
-
-    if (!response.ok) {
-      console.log(`Store search fetch failed for ${storeName}: ${response.status}`);
-      return null;
-    }
-
-    const html = await response.text();
-    const textContent = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return await extractPriceWithAI(textContent, productName, storeName, apiKey);
-  } catch (err) {
-    console.error(`Store search extraction failed for ${productName} @ ${storeName}:`, err);
-    return null;
-  }
-}
-
+// ── Main handler ──
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const TAVILY_API_KEY = Deno.env.get('TAVILY_API_KEY');
-    if (!TAVILY_API_KEY) throw new Error('TAVILY_API_KEY is not configured');
-
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
+    const FIRECRAWL_API_KEY = Deno.env.get('FIRECRAWL_API_KEY');
+    if (!FIRECRAWL_API_KEY) throw new Error('FIRECRAWL_API_KEY is not configured');
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Get all monitored products
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('*')
@@ -237,13 +125,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const storeNames: Record<string, string> = {
-      tunisianet: 'tunisianet.com.tn',
-      tunisiatech: 'tunisiatech.tn',
-      spacenet: 'spacenet.tn',
-      wiki: 'wiki.tn',
-    };
-
     const storeLabels: Record<string, string> = {
       tunisianet: 'Tunisianet',
       tunisiatech: 'Tunisiatech',
@@ -251,181 +132,80 @@ Deno.serve(async (req) => {
       wiki: 'Wiki',
     };
 
-    const newPriceEntries: any[] = [];
-    const newAlerts: any[] = [];
-
+    // Build all tasks
+    type Task = { product: Product; store: string; storeLabel: string };
+    const tasks: Task[] = [];
     for (const product of products as Product[]) {
-      const urls = product.urls || {};
-
-      for (const [store, url] of Object.entries(urls)) {
-        if (!url) continue;
-
-        try {
-          const storeLabel = storeLabels[store] || store;
-          const normalizedUrl = normalizeProductUrl(store, url);
-          let foundPrice: number | null = null;
-
-          // 1) Primary path: use exact product URL for better precision and no Tavily dependency
-          foundPrice = await extractPriceFromDirectUrl(
-            normalizedUrl,
-            product.name,
-            storeLabel,
-            LOVABLE_API_KEY,
-          );
-
-          // 2) Secondary path: store-native search page (works when product URL is outdated)
-          if (!foundPrice) {
-            foundPrice = await extractPriceFromStoreSearch(
-              store,
-              product.name,
-              storeLabel,
-              LOVABLE_API_KEY,
-            );
-          }
-
-          // 3) Last fallback: Tavily search + AI extraction
-          if (!foundPrice) {
-            const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
-
-            await sleep(400);
-
-            const tavilyResponse = await fetch('https://api.tavily.com/search', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                api_key: TAVILY_API_KEY,
-                query: searchQuery,
-                search_depth: 'basic',
-                include_raw_content: true,
-                max_results: 5,
-                include_domains: [storeNames[store]],
-              }),
-            });
-
-            if (!tavilyResponse.ok) {
-              console.error(`Tavily error for ${product.name} on ${store}: ${tavilyResponse.status}`);
-            } else {
-              const tavilyData = await tavilyResponse.json();
-              const results: TavilyResult[] = tavilyData.results || [];
-
-              if (results.length === 0) {
-                console.log(`${product.name} @ ${store}: no Tavily results`);
-              } else {
-                const allContent = results
-                  .map(r => `--- ${r.title} ---\n${r.raw_content || r.content}`)
-                  .join('\n\n');
-
-                foundPrice = await extractPriceWithAI(
-                  allContent,
-                  product.name,
-                  storeLabel,
-                  LOVABLE_API_KEY,
-                );
-              }
-            }
-          }
-
-          console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
-
-          await sleep(300);
-
-          if (foundPrice) {
-            newPriceEntries.push({
-              product_id: product.id,
-              store,
-              price: foundPrice,
-              currency: 'TND',
-            });
-
-            // Check for price change vs previous
-            const { data: lastPrice } = await supabase
-              .from('price_entries')
-              .select('price')
-              .eq('product_id', product.id)
-              .eq('store', store)
-              .order('checked_at', { ascending: false })
-              .limit(1)
-              .single();
-
-            if (lastPrice && lastPrice.price !== foundPrice) {
-              const oldPrice = Number(lastPrice.price);
-              const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
-              const direction = foundPrice < oldPrice ? 'down' : 'up';
-
-              // Get all current prices for AI recommendation context
-              const { data: allCurrentPrices } = await supabase
-                .from('price_entries')
-                .select('store, price')
-                .eq('product_id', product.id)
-                .order('checked_at', { ascending: false });
-
-              const priceMap: Record<string, number> = {};
-              if (allCurrentPrices) {
-                for (const p of allCurrentPrices) {
-                  if (!priceMap[p.store]) priceMap[p.store] = Number(p.price);
-                }
-              }
-              priceMap[store] = foundPrice;
-
-              // Call AI recommendation
-              let recommendation = '';
-              try {
-                const aiResponse = await fetch(
-                  `${SUPABASE_URL}/functions/v1/ai-recommendation`,
-                  {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      productName: product.name,
-                      store,
-                      oldPrice,
-                      newPrice: foundPrice,
-                      changePercent,
-                      direction,
-                      allPrices: priceMap,
-                    }),
-                  }
-                );
-                const aiData = await aiResponse.json();
-                recommendation = aiData.recommendation || '';
-              } catch (aiErr) {
-                console.error('AI recommendation error:', aiErr);
-                recommendation = direction === 'down'
-                  ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. ${oldPrice} → ${foundPrice} TND.`
-                  : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${store}. ${oldPrice} → ${foundPrice} TND.`;
-              }
-
-              newAlerts.push({
-                product_id: product.id,
-                product_name: product.name,
-                store,
-                old_price: oldPrice,
-                new_price: foundPrice,
-                change_percent: Math.round(changePercent * 100) / 100,
-                direction,
-                recommendation,
-              });
-            }
-          }
-        } catch (storeError) {
-          console.error(`Error checking ${store} for ${product.name}:`, storeError);
-        }
+      for (const [store] of Object.entries(product.urls || {})) {
+        tasks.push({ product, store, storeLabel: storeLabels[store] || store });
       }
     }
 
-    // Insert new price entries
+    // Process ALL in parallel — each Firecrawl call does scrape + extraction
+    const results = await Promise.allSettled(
+      tasks.map(async ({ product, store, storeLabel }) => {
+        const searchUrl = buildStoreSearchUrl(store, product.name);
+        if (!searchUrl) return { product, store, storeLabel, price: null };
+
+        console.log(`Checking ${product.name} @ ${storeLabel}...`);
+        const price = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
+        return { product, store, storeLabel, price };
+      })
+    );
+
+    const newPriceEntries: any[] = [];
+    const newAlerts: any[] = [];
+
+    for (const result of results) {
+      if (result.status !== 'fulfilled' || !result.value.price) continue;
+      const { product, store, storeLabel, price: foundPrice } = result.value;
+
+      newPriceEntries.push({
+        product_id: product.id,
+        store,
+        price: foundPrice,
+        currency: 'TND',
+      });
+
+      const { data: lastPrice } = await supabase
+        .from('price_entries')
+        .select('price')
+        .eq('product_id', product.id)
+        .eq('store', store)
+        .order('checked_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (lastPrice && lastPrice.price !== foundPrice) {
+        const oldPrice = Number(lastPrice.price);
+        const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
+        const direction = foundPrice < oldPrice ? 'down' : 'up';
+
+        newAlerts.push({
+          product_id: product.id,
+          product_name: product.name,
+          store,
+          old_price: oldPrice,
+          new_price: foundPrice,
+          change_percent: Math.round(changePercent * 100) / 100,
+          direction,
+          recommendation: direction === 'down'
+            ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`
+            : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${storeLabel}. ${oldPrice} → ${foundPrice} TND.`,
+        });
+      }
+    }
+
     if (newPriceEntries.length > 0) {
-      const { error: insertError } = await supabase.from('price_entries').insert(newPriceEntries);
-      if (insertError) console.error('Error inserting prices:', insertError);
+      const { error } = await supabase.from('price_entries').insert(newPriceEntries);
+      if (error) console.error('Error inserting prices:', error);
     }
 
-    // Insert new alerts
     if (newAlerts.length > 0) {
-      const { error: alertError } = await supabase.from('price_alerts').insert(newAlerts);
-      if (alertError) console.error('Error inserting alerts:', alertError);
+      const { error } = await supabase.from('price_alerts').insert(newAlerts);
+      if (error) console.error('Error inserting alerts:', error);
     }
 
-    // Update monitoring status
     const { data: monitoringRows } = await supabase
       .from('monitoring_status')
       .select('id, total_checks')
@@ -433,14 +213,11 @@ Deno.serve(async (req) => {
       .single();
 
     if (monitoringRows) {
-      await supabase
-        .from('monitoring_status')
-        .update({
-          last_check: new Date().toISOString(),
-          next_check: new Date(Date.now() + 3600000).toISOString(),
-          total_checks: (monitoringRows.total_checks || 0) + 1,
-        })
-        .eq('id', monitoringRows.id);
+      await supabase.from('monitoring_status').update({
+        last_check: new Date().toISOString(),
+        next_check: new Date(Date.now() + 3600000).toISOString(),
+        total_checks: (monitoringRows.total_checks || 0) + 1,
+      }).eq('id', monitoringRows.id);
     }
 
     return new Response(JSON.stringify({
