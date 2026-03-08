@@ -1,16 +1,7 @@
 // =============================================================================
 // AI Recommendation Edge Function for Mytek Price Monitoring
 // =============================================================================
-// 
-// 🔑 API KEY CONFIGURATION:
-// 
-// On Lovable Cloud: Uses LOVABLE_API_KEY (auto-configured, no setup needed)
-// 
-// On VS Code / Local development: You need your own OpenAI API key.
-// Set this environment variable in your .env file:
-//   OPENAI_API_KEY=sk-your-openai-api-key-here
-//
-// Get your OpenAI API key at: https://platform.openai.com/api-keys
+// Uses OpenAI API directly with OPENAI_API_KEY secret
 // =============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -20,11 +11,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Lovable Cloud uses this gateway (auto-configured)
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-
-// VS Code / Local: Replace with OpenAI direct URL
-// const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -32,21 +19,11 @@ serve(async (req) => {
   try {
     const { productName, store, oldPrice, newPrice, changePercent, direction, allPrices } = await req.json();
 
-    // =========================================================================
-    // 🔑 VS CODE / LOCAL: Comment the LOVABLE_API_KEY block below and 
-    //    uncomment the OPENAI_API_KEY block instead
-    // =========================================================================
+    // --- OpenAI Direct ---
     
-    // --- Lovable Cloud (default) ---
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
-    const aiUrl = LOVABLE_AI_URL;
-
-    // --- VS Code / Local (uncomment this block, comment the block above) ---
-    // const apiKey = Deno.env.get("OPENAI_API_KEY");
-    // if (!apiKey) throw new Error("OPENAI_API_KEY is not configured. Add it to your .env file.");
-    // const aiUrl = "https://api.openai.com/v1/chat/completions";
-    // =========================================================================
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+    const aiUrl = OPENAI_URL;
 
     const priceContext = allPrices 
       ? `Prix actuels chez les concurrents:\n${Object.entries(allPrices).map(([s, p]) => `- ${s}: ${p} TND`).join('\n')}`
@@ -80,7 +57,7 @@ Quelle est ta recommandation stratégique pour Mytek ?`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5-mini",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
