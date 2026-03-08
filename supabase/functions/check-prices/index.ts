@@ -154,13 +154,18 @@ function normalizeProductUrl(store: string, url: string): string {
 }
 
 function buildStoreSearchUrl(store: string, productName: string): string | null {
-  const query = encodeURIComponent(productName);
+  // Simplify product name for better search: remove "GO" variations
+  const simplifiedName = productName
+    .replace(/\s*(GO|Go|go|GB|Gb|gb)\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const query = encodeURIComponent(simplifiedName);
 
   const map: Record<string, string> = {
-    tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&orderby=price&orderway=asc&s=${query}&submit_search=`,
-    tunisiatech: `https://tunisiatech.tn/module/prestaadvancesearch/advancesearch?s=${query}`,
-    spacenet: `https://spacenet.tn/catalogsearch/result/?q=${query}`,
-    wiki: `https://www.wiki.tn/catalogsearch/result/?q=${query}`,
+    tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&s=${query}&submit_search=`,
+    tunisiatech: `https://tunisiatech.tn/recherche?controller=search&s=${query}`,
+    spacenet: `https://spacenet.tn/recherche?s=${query}`,
+    wiki: `https://www.wiki.tn/recherche?s=${query}`,
   };
 
   return map[store] || null;
