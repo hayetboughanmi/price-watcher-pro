@@ -33,28 +33,26 @@ async function extractPriceFromStore(
       },
       body: JSON.stringify({
         url,
-        formats: [
-          {
-            type: 'json',
-            prompt: `Find the price in TND (Tunisian Dinar) for the smartphone "${productName}" on this page.
+        formats: ['extract'],
+        extract: {
+          prompt: `Find the price in TND (Tunisian Dinar) for the smartphone "${productName}" on this page.
 Rules:
 - Only match the EXACT model (iPhone 16 ≠ iPhone 16 Pro ≠ iPhone 15)
 - 128go = 128 Go = 128GB (same for other capacities)
 - Ignore accessories, cases, cables
 - If promo price exists, return the promo price
-- If multiple color variants exist, return the cheapest
+- If multiple color variants, return the cheapest
 - Return null if the exact product is not found`,
-            schema: {
-              type: 'object',
-              properties: {
-                price: { type: 'number', description: 'Price in TND, or null if not found' },
-                found: { type: 'boolean', description: 'Whether the exact product was found' },
-                product_matched: { type: 'string', description: 'Name of the product matched' },
-              },
-              required: ['price', 'found'],
+          schema: {
+            type: 'object',
+            properties: {
+              price: { type: 'number', description: 'Price in TND, or null if not found' },
+              found: { type: 'boolean', description: 'Whether the exact product was found' },
+              product_matched: { type: 'string', description: 'Name of the product matched' },
             },
+            required: ['price', 'found'],
           },
-        ],
+        },
         onlyMainContent: true,
       }),
     });
