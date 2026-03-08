@@ -86,7 +86,14 @@ export function useProducts() {
     });
     if (error) { toast.error('Erreur lors de l\'ajout'); return; }
     await fetchAll();
-  }, [fetchAll]);
+    // Auto-check prices for the new product
+    try {
+      await checkPrices();
+      toast.success('📊 Prix récupérés automatiquement !');
+    } catch {
+      // Silently fail — user can manually check later
+    }
+  }, [fetchAll, checkPrices]);
 
   const removeProduct = useCallback(async (id: string) => {
     await supabase.from('products').delete().eq('id', id);
