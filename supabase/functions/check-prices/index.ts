@@ -193,43 +193,38 @@ Deno.serve(async (req) => {
     const newPriceEntries: any[] = [];
     const newAlerts: any[] = [];
 
+    // Build all scrape tasks across all products and stores
+    type ScrapeTask = { product: Product; store: string; storeLabel: string };
+    const tasks: ScrapeTask[] = [];
+
     for (const product of products as Product[]) {
       const urls = product.urls || {};
-      const storeEntries = Object.entries(urls).filter(([_, url]) => !!url);
+      for (const [store, url] of Object.entries(urls)) {
+        if (!url) continue;
+        tasks.push({ product, store, storeLabel: storeLabels[store] || store });
+      }
+    }
 
-      // Process all stores for this product in parallel
-      const storeResults = await Promise.allSettled(
-        storeEntries.map(async ([store, url]) => {
-          const storeLabel = storeLabels[store] || store;
-          let foundPrice: number | null = null;
+    // Process ALL tasks in parallel (search pages only - direct URLs are unreliable)
+    const allResults = await Promise.allSettled(
+      tasks.map(async ({ product, store, storeLabel }) => {
+        const searchUrl = buildStoreSearchUrl(store, product.name);
+        if (!searchUrl) return { product, store, storeLabel, foundPrice: null };
 
-          // 1) Try scraping the store search page (more reliable than direct URLs)
-          const searchUrl = buildStoreSearchUrl(store, product.name);
-          if (searchUrl) {
-            console.log(`Scraping search page for ${product.name} @ ${storeLabel}...`);
-            const searchContent = await scrapeWithFirecrawl(searchUrl, FIRECRAWL_API_KEY);
-            if (searchContent) {
-              foundPrice = await extractPriceWithAI(searchContent, product.name, storeLabel, LOVABLE_API_KEY);
-            }
-          }
+        console.log(`Scraping ${product.name} @ ${storeLabel}...`);
+        const content = await scrapeWithFirecrawl(searchUrl, FIRECRAWL_API_KEY);
+        let foundPrice: number | null = null;
+        if (content) {
+          foundPrice = await extractPriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
+        }
+        console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
+        return { product, store, storeLabel, foundPrice };
+      })
+    );
 
-          // 2) Fallback: scrape direct product URL
-          if (!foundPrice) {
-            console.log(`Scraping direct URL for ${product.name} @ ${storeLabel}...`);
-            const directContent = await scrapeWithFirecrawl(url, FIRECRAWL_API_KEY);
-            if (directContent) {
-              foundPrice = await extractPriceWithAI(directContent, product.name, storeLabel, LOVABLE_API_KEY);
-            }
-          }
-
-          console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
-          return { store, storeLabel, foundPrice };
-        })
-      );
-
-      for (const result of storeResults) {
-        if (result.status !== 'fulfilled' || !result.value.foundPrice) continue;
-        const { store, storeLabel, foundPrice } = result.value;
+    for (const result of allResults) {
+      if (result.status !== 'fulfilled' || !result.value.foundPrice) continue;
+      const { product, store, storeLabel, foundPrice } = result.value;
         newPriceEntries.push({
           product_id: product.id,
           store,
