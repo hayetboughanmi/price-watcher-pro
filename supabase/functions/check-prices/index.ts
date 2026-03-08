@@ -167,10 +167,11 @@ Deno.serve(async (req) => {
 
           // Try to extract price from results — combine all content for better context
           let foundPrice: number | null = null;
-          // Combine all results content for better extraction
-          const allContent = results.map(r => `${r.title} ${r.content}`).join('\n');
+          // Combine all results content (prefer raw_content for full page data)
+          const allContent = results.map(r => `${r.title} ${(r as any).raw_content || r.content}`).join('\n');
           const allTitles = results.map(r => r.title).join(' | ');
           foundPrice = extractPrice(allContent, allTitles, product.name);
+          console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'no price found'} (${results.length} results)`);
 
           // Add delay between store checks
           await sleep(1000);
