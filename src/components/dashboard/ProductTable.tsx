@@ -49,14 +49,14 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
         <Table className="table-fixed w-full">
           <TableHeader>
             <TableRow className="border-border/50">
-              <TableHead>Produit</TableHead>
-              <TableHead>Catégorie</TableHead>
+              <TableHead className="w-[22%]">Produit</TableHead>
+              <TableHead className="w-[10%]">Catégorie</TableHead>
               {Object.values(STORE_CONFIG).map(store => (
-                <TableHead key={store.label} className="text-center">{store.label}</TableHead>
+                <TableHead key={store.label} className="text-center w-[11%] px-1">{store.label}</TableHead>
               ))}
-              <TableHead className="text-center">Meilleur Prix</TableHead>
-              <TableHead className="text-center">Statut</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="text-center w-[12%] px-1">Meilleur</TableHead>
+              <TableHead className="text-center w-[9%] px-1">Statut</TableHead>
+              <TableHead className="text-right w-[8%] px-1">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
