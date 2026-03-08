@@ -46,8 +46,7 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
         <CardTitle className="font-display text-lg">Produits Surveillés</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <ScrollArea className="w-full">
-        <Table className="min-w-[800px]">
+        <Table className="table-fixed w-full">
           <TableHeader>
             <TableRow className="border-border/50">
               <TableHead>Produit</TableHead>
