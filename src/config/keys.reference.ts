@@ -28,11 +28,11 @@ export const FIRECRAWL_API_KEY = '';
 export const TAVILY_API_KEY = '';
 
 // -----------------------------------------------
-// 🤖 LOVABLE AI (GPT-5, Gemini) — Recommandations IA
-// Clé auto-générée par Lovable Cloud
+// 🤖 OPENAI — Recommandations IA
+// Obtenir une clé : https://platform.openai.com/api-keys
 // Utilisé dans : supabase/functions/ai-recommendation
 // -----------------------------------------------
-export const LOVABLE_API_KEY = ''; // auto-généré, ne pas modifier
+export const OPENAI_API_KEY = ''; // configuré dans les secrets Cloud
 
 // -----------------------------------------------
 // 🗄️ BASE DE DONNÉES — PostgreSQL (Lovable Cloud)
