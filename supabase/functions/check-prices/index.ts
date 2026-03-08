@@ -93,28 +93,34 @@ async function extractPriceWithAI(content: string, title: string, productName: s
 function extractPriceRegex(content: string, title: string): number | null {
   const textToSearch = `${title} ${content}`;
   
-  // Only match prices that are clearly marked with currency
+  // Match prices with currency markers (TND, DT, TTC)
   const patterns = [
-    /(\d[\d\s]*[\d])\s*(?:TND|DT)\b/gi,
-    /(?:prix|price)\s*:?\s*(\d[\d\s]*[\d])\s*(?:TND|DT)/gi,
+    // 4 299,000 DT or 4299.000 DT or 4 299 DT
+    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC)\b/gi,
+    // Prix: 4299 or prix 4 299
+    /(?:prix|price|tarif)\s*:?\s*(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC)?/gi,
   ];
 
   const candidates: number[] = [];
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(textToSearch)) !== null) {
-      const priceStr = match[1].replace(/\s/g, '').replace(',', '.');
+      let priceStr = match[1].replace(/\s/g, '');
+      // Handle Tunisian format: 4.299,000 → 4299.000 or 4,299.000
+      if (/^\d{1,3}\.\d{3}/.test(priceStr)) {
+        priceStr = priceStr.replace('.', ''); // thousand separator
+      }
+      priceStr = priceStr.replace(',', '.');
+      // Remove trailing .000
+      priceStr = priceStr.replace(/\.0{3}$/, '');
       const price = parseFloat(priceStr);
-      // Only accept prices in reasonable range for Tunisian electronics
       if (price >= 100 && price < 50000) {
         candidates.push(price);
       }
     }
   }
   
-  // Return the most likely price (highest in range, as product prices tend to be prominent)
   if (candidates.length > 0) {
-    // Sort and return the most reasonable one (not outlier)
     candidates.sort((a, b) => b - a);
     return Math.round(candidates[0] * 100) / 100;
   }
