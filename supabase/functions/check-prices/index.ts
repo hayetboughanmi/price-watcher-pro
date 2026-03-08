@@ -68,7 +68,7 @@ ${truncated}`,
           },
         ],
         temperature: 0,
-        max_tokens: 30,
+        max_completion_tokens: 30,
       }),
     });
 
