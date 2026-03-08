@@ -64,7 +64,7 @@ Rules:
     }
 
     const data = await response.json();
-    const extracted = data.data?.json || data.json;
+    const extracted = data.data?.extract || data.extract;
 
     if (!extracted || !extracted.found || !extracted.price) {
       console.log(`${productName} not found on ${storeName}`);
