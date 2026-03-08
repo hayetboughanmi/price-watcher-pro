@@ -37,7 +37,7 @@ async function extractPriceWithAI(
 ): Promise<number | null> {
   try {
     // Keep enough content because product grids often appear later in the page
-    const truncated = content.slice(0, 50000);
+    const truncated = content.slice(0, 60000);
 
     const response = await fetch(LOVABLE_AI_URL, {
       method: "POST",
@@ -50,16 +50,20 @@ async function extractPriceWithAI(
         messages: [
           {
             role: "system",
-            content: `Tu es un extracteur de prix e-commerce ultra strict.
-On te donne le contenu texte d'une page web tunisienne + un produit exact.
-Règles:
-- Retourne le prix en TND/DT du PRODUIT EXACT uniquement.
-- Considère comme équivalents: 128go = 128 go = 128gb (idem pour autres capacités).
-- Ignore les différences mineures de casse, accents, tirets et espaces.
-- Ignore Pro/Plus/Max si ce n'est pas explicitement demandé.
-- Si prix promo existe, retourne le prix promo.
-- Si produit indisponible ou introuvable, retourne NOT_FOUND.
-- Réponse = uniquement un nombre (ex: 2899) ou NOT_FOUND.`,
+            content: `Tu es un extracteur de prix e-commerce ultra précis pour des sites tunisiens.
+On te donne le contenu d'une page web et un produit recherché.
+
+RÈGLES IMPORTANTES:
+1. Cherche le SMARTPHONE correspondant au produit demandé (pas les accessoires/coques/câbles)
+2. Variantes acceptables: "128go" = "128 go" = "128GB" = "128 Go" (idem autres capacités)
+3. Si le produit exact n'est pas trouvé mais qu'une variante proche existe (couleur différente), utilise ce prix
+4. IGNORE les modèles différents: iPhone 16 ≠ iPhone 16 Pro ≠ iPhone 15
+5. Retourne le prix le moins cher en TND si plusieurs variantes
+6. Format réponse: uniquement le nombre (ex: 2899) ou NOT_FOUND si introuvable
+
+EXEMPLES:
+- Recherche "iPhone 16 128 Go" → trouve "iPhone 16 128 Go Noir à 3299 DT" → réponds "3299"
+- Recherche "iPhone 16 128 Go" → trouve seulement "iPhone 16 Pro 256 Go" → réponds "NOT_FOUND"`,
           },
           {
             role: "user",
