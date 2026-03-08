@@ -148,8 +148,8 @@ Deno.serve(async (req) => {
         if (!searchUrl) return { product, store, storeLabel, price: null };
 
         console.log(`Checking ${product.name} @ ${storeLabel}...`);
-        const price = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
-        return { product, store, storeLabel, price };
+        const result = await extractPriceFromStore(searchUrl, product.name, storeLabel, FIRECRAWL_API_KEY);
+        return { product, store, storeLabel, price: result?.price || null, matchedName: result?.matchedName || null };
       })
     );
 
