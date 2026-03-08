@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Plus } from 'lucide-react';
 import { Product, STORE_CONFIG, StoreName } from '@/types';
 import { toast } from 'sonner';
@@ -16,9 +17,18 @@ const AddProductDialog = ({ onAdd }: AddProductDialogProps) => {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
-  const [urls, setUrls] = useState<Partial<Record<StoreName, string>>>({});
+  const [selectedStores, setSelectedStores] = useState<Set<StoreName>>(new Set());
 
   const categories = ['Smartphones', 'Laptops', 'Tablettes', 'Accessoires', 'TV & Audio', 'Gaming', 'Composants PC'];
+
+  const toggleStore = (store: StoreName) => {
+    setSelectedStores(prev => {
+      const next = new Set(prev);
+      if (next.has(store)) next.delete(store);
+      else next.add(store);
+      return next;
+    });
+  };
 
   const handleSubmit = () => {
     if (!name.trim()) {
@@ -29,20 +39,23 @@ const AddProductDialog = ({ onAdd }: AddProductDialogProps) => {
       toast.error('Veuillez sélectionner une catégorie');
       return;
     }
-    const validUrls = Object.fromEntries(
-      Object.entries(urls).filter(([, v]) => v && v.trim())
-    ) as Partial<Record<StoreName, string>>;
-
-    if (Object.keys(validUrls).length === 0) {
-      toast.error('Ajoutez au moins un lien de produit');
+    if (selectedStores.size === 0) {
+      toast.error('Sélectionnez au moins un magasin');
       return;
     }
 
-    onAdd({ name: name.trim(), category, urls: validUrls, isMonitored: true });
+    // Build URLs automatically from store base URLs
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const urls: Partial<Record<StoreName, string>> = {};
+    selectedStores.forEach(store => {
+      urls[store] = `${STORE_CONFIG[store].url}/${slug}`;
+    });
+
+    onAdd({ name: name.trim(), category, urls, isMonitored: true });
     toast.success('✅ Produit ajouté avec succès !');
     setName('');
     setCategory('');
-    setUrls({});
+    setSelectedStores(new Set());
     setOpen(false);
   };
 
@@ -82,18 +95,31 @@ const AddProductDialog = ({ onAdd }: AddProductDialogProps) => {
             </Select>
           </div>
           <div className="space-y-3">
-            <Label>Liens des produits (au moins 1)</Label>
-            {(Object.keys(STORE_CONFIG) as StoreName[]).map(store => (
-              <div key={store} className="flex items-center gap-2">
-                <span className="text-xs font-medium w-24 shrink-0">{STORE_CONFIG[store].label}</span>
-                <Input
-                  value={urls[store] || ''}
-                  onChange={e => setUrls(prev => ({ ...prev, [store]: e.target.value }))}
-                  placeholder={`URL ${STORE_CONFIG[store].label}`}
-                  className="text-xs"
-                />
-              </div>
-            ))}
+            <Label>Magasins à surveiller</Label>
+            <div className="grid grid-cols-2 gap-3 mt-1.5">
+              {(Object.keys(STORE_CONFIG) as StoreName[]).map(store => (
+                <label
+                  key={store}
+                  className={`flex items-center gap-2.5 p-3 rounded-lg border cursor-pointer transition-all ${
+                    selectedStores.has(store)
+                      ? 'border-primary bg-primary/5 shadow-sm'
+                      : 'border-border/50 hover:border-border'
+                  }`}
+                >
+                  <Checkbox
+                    checked={selectedStores.has(store)}
+                    onCheckedChange={() => toggleStore(store)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: STORE_CONFIG[store].color }}
+                    />
+                    <span className="text-sm font-medium">{STORE_CONFIG[store].label}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
           <Button onClick={handleSubmit} className="w-full gradient-primary text-primary-foreground border-0 h-11">
             <Plus className="h-4 w-4 mr-2" /> Ajouter et Surveiller
