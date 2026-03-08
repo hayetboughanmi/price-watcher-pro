@@ -74,14 +74,22 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
                     <Badge variant="secondary" className="text-xs">{product.category}</Badge>
                   </TableCell>
                   {(Object.keys(STORE_CONFIG) as StoreName[]).map(store => {
-                    const price = getLatestPrice(product.id, store);
+                    const entry = getLatestPriceEntry(product.id, store);
+                    const price = entry?.price;
                     const isBest = best.store === store && best.price === price;
                     return (
                       <TableCell key={store} className="text-center">
                         {price ? (
-                          <span className={`font-mono text-sm ${isBest ? 'text-success font-bold' : ''}`}>
-                            {price.toLocaleString()} TND
-                          </span>
+                          <div>
+                            {entry?.matchedName && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[120px] mx-auto mb-0.5" title={entry.matchedName}>
+                                {entry.matchedName}
+                              </p>
+                            )}
+                            <span className={`font-mono text-sm ${isBest ? 'text-success font-bold' : ''}`}>
+                              {price.toLocaleString()} TND
+                            </span>
+                          </div>
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
                         )}
