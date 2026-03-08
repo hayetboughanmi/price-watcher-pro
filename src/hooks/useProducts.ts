@@ -77,6 +77,21 @@ export function useProducts() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  const checkPrices = useCallback(async () => {
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    const res = await fetch(`https://${projectId}.supabase.co/functions/v1/check-prices`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Check failed');
+    await fetchAll();
+    return data;
+  }, [fetchAll]);
+
   const addProduct = useCallback(async (product: Omit<Product, 'id' | 'addedAt'>) => {
     const { error } = await supabase.from('products').insert({
       name: product.name,
@@ -85,8 +100,15 @@ export function useProducts() {
       is_monitored: product.isMonitored,
     });
     if (error) { toast.error('Erreur lors de l\'ajout'); return; }
+    toast.info('🔍 Récupération des prix en cours...');
     await fetchAll();
-  }, [fetchAll]);
+    try {
+      await checkPrices();
+      await fetchAll();
+    } catch {
+      // Silently fail
+    }
+  }, [fetchAll, checkPrices]);
 
   const removeProduct = useCallback(async (id: string) => {
     await supabase.from('products').delete().eq('id', id);
@@ -110,21 +132,6 @@ export function useProducts() {
     }
     setMonitoring(prev => ({ ...prev, isAutoMonitoring: enabled }));
   }, []);
-
-  const checkPrices = useCallback(async () => {
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-    const res = await fetch(`https://${projectId}.supabase.co/functions/v1/check-prices`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Check failed');
-    await fetchAll();
-    return data;
-  }, [fetchAll]);
 
   return {
     products, prices, alerts, monitoring, loading,
