@@ -175,10 +175,6 @@ Deno.serve(async (req) => {
 
           if (!tavilyResponse.ok) {
             console.error(`Tavily error for ${product.name} on ${store}: ${tavilyResponse.status}`);
-            if (tavilyResponse.status === 432 || tavilyResponse.status === 429) {
-              console.log('Rate limited, waiting 5s...');
-              await sleep(5000);
-            }
             continue;
           }
 
