@@ -136,6 +136,55 @@ async function extractPriceFromDirectUrl(
   }
 }
 
+function buildStoreSearchUrl(store: string, productName: string): string | null {
+  const query = encodeURIComponent(productName);
+
+  const map: Record<string, string> = {
+    tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&s=${query}`,
+    tunisiatech: `https://www.tunisiatech.tn/catalogsearch/result/?q=${query}`,
+    spacenet: `https://spacenet.tn/catalogsearch/result/?q=${query}`,
+    wiki: `https://www.wiki.tn/catalogsearch/result/?q=${query}`,
+  };
+
+  return map[store] || null;
+}
+
+async function extractPriceFromStoreSearch(
+  store: string,
+  productName: string,
+  storeName: string,
+  apiKey: string,
+): Promise<number | null> {
+  try {
+    const searchUrl = buildStoreSearchUrl(store, productName);
+    if (!searchUrl) return null;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+      },
+    });
+
+    if (!response.ok) {
+      console.log(`Store search fetch failed for ${storeName}: ${response.status}`);
+      return null;
+    }
+
+    const html = await response.text();
+    const textContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return await extractPriceWithAI(textContent, productName, storeName, apiKey);
+  } catch (err) {
+    console.error(`Store search extraction failed for ${productName} @ ${storeName}:`, err);
+    return null;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
