@@ -1,8 +1,16 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// =============================================================================
+// Price Check Edge Function — Tavily + AI Recommendations
+// =============================================================================
+// 
+// 🔑 VS CODE / LOCAL: Set these in your .env file:
+//   TAVILY_API_KEY=tvly-your-tavily-api-key
+//   OPENAI_API_KEY=sk-your-openai-api-key (for AI recommendations)
+//
+// Get Tavily key at: https://tavily.com
+// Get OpenAI key at: https://platform.openai.com/api-keys
+// =============================================================================
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 };
 
 interface Product {
