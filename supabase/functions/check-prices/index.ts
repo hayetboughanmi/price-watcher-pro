@@ -74,7 +74,7 @@ Rules:
     const price = Number(extracted.price);
     if (!isNaN(price) && price >= 100 && price < 50000) {
       console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${extracted.product_matched || 'N/A'})`);
-      return Math.round(price * 100) / 100;
+      return { price: Math.round(price * 100) / 100, matchedName: extracted.product_matched || null };
     }
 
     console.log(`Invalid price from ${storeName}: ${extracted.price}`);
