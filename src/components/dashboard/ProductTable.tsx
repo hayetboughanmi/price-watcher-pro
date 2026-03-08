@@ -130,8 +130,6 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
             })}
           </TableBody>
         </Table>
-        <ScrollBar orientation="horizontal" />
-        </ScrollArea>
       </CardContent>
     </Card>
   );
