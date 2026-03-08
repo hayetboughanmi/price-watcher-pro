@@ -150,11 +150,47 @@ Deno.serve(async (req) => {
               const changePercent = ((foundPrice - oldPrice) / oldPrice) * 100;
               const direction = foundPrice < oldPrice ? 'down' : 'up';
 
+              // Get all current prices for this product for AI context
+              const { data: allCurrentPrices } = await supabase
+                .from('price_entries')
+                .select('store, price')
+                .eq('product_id', product.id)
+                .order('checked_at', { ascending: false });
+              
+              const priceMap: Record<string, number> = {};
+              if (allCurrentPrices) {
+                for (const p of allCurrentPrices) {
+                  if (!priceMap[p.store]) priceMap[p.store] = Number(p.price);
+                }
+              }
+              priceMap[store] = foundPrice;
+
+              // Call AI recommendation
               let recommendation = '';
-              if (direction === 'down') {
-                recommendation = `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. Ancien prix: ${oldPrice} TND → Nouveau: ${foundPrice} TND.`;
-              } else {
-                recommendation = `📈 Hausse de ${changePercent.toFixed(1)}% chez ${store}. Le prix est passé de ${oldPrice} TND à ${foundPrice} TND.`;
+              try {
+                const aiResponse = await fetch(
+                  `${SUPABASE_URL}/functions/v1/ai-recommendation`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      productName: product.name,
+                      store,
+                      oldPrice,
+                      newPrice: foundPrice,
+                      changePercent,
+                      direction,
+                      allPrices: priceMap,
+                    }),
+                  }
+                );
+                const aiData = await aiResponse.json();
+                recommendation = aiData.recommendation || '';
+              } catch (aiErr) {
+                console.error('AI recommendation error:', aiErr);
+                recommendation = direction === 'down'
+                  ? `📉 Baisse de ${Math.abs(changePercent).toFixed(1)}% chez ${store}. Ancien: ${oldPrice} TND → Nouveau: ${foundPrice} TND.`
+                  : `📈 Hausse de ${changePercent.toFixed(1)}% chez ${store}. ${oldPrice} TND → ${foundPrice} TND.`;
               }
 
               newAlerts.push({
