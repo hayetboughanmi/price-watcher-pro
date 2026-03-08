@@ -46,7 +46,13 @@ const AnalyticsView = ({ products, prices }: AnalyticsViewProps) => {
   const comparisonData = useMemo(() => {
     return products.map(product => {
       const productPrices = prices.filter(p => p.productId === product.id);
-      const entry: Record<string, string | number> = { name: product.name.length > 20 ? product.name.slice(0, 20) + '…' : product.name };
+      // Shorten name: remove store suffixes and trim
+      let shortName = product.name
+        .replace(/\s*[-–—]\s*(tunisianet|tunisiatech|spacenet|wiki)\.?\w*/gi, '')
+        .replace(/\s*\|\s*(tunisianet|tunisiatech|spacenet|wiki)\.?\w*/gi, '')
+        .trim();
+      if (shortName.length > 25) shortName = shortName.slice(0, 25) + '…';
+      const entry: Record<string, string | number> = { name: shortName, fullName: product.name };
       (Object.keys(STORE_CONFIG) as StoreName[]).forEach(store => {
         const latest = productPrices.filter(p => p.store === store).sort((a, b) => b.checkedAt.localeCompare(a.checkedAt))[0];
         if (latest) entry[store] = latest.price;
