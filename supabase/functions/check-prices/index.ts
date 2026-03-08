@@ -220,7 +220,7 @@ Deno.serve(async (req) => {
       if (result.status !== 'fulfilled' || !result.value.content) continue;
       const { product, store, storeLabel, content } = result.value;
 
-      await sleep(500); // Rate limit protection
+      await sleep(1500); // Rate limit protection
       const foundPrice = await extractPriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
       console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'not found'}`);
 
