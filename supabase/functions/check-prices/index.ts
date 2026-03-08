@@ -140,8 +140,8 @@ function buildStoreSearchUrl(store: string, productName: string): string | null 
   const query = encodeURIComponent(productName);
 
   const map: Record<string, string> = {
-    tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&s=${query}`,
-    tunisiatech: `https://www.tunisiatech.tn/catalogsearch/result/?q=${query}`,
+    tunisianet: `https://www.tunisianet.com.tn/recherche?controller=search&orderby=price&orderway=asc&s=${query}&submit_search=`,
+    tunisiatech: `https://tunisiatech.tn/module/prestaadvancesearch/advancesearch?s=${query}`,
     spacenet: `https://spacenet.tn/catalogsearch/result/?q=${query}`,
     wiki: `https://www.wiki.tn/catalogsearch/result/?q=${query}`,
   };
