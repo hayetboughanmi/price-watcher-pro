@@ -81,16 +81,20 @@ const ProductTable = ({ products, prices, onRemove, onSelect }: ProductTableProp
                     return (
                       <TableCell key={store} className="text-center">
                         {price ? (
-                          <div>
-                            {entry?.matchedName && (
-                              <p className="text-[10px] text-muted-foreground truncate max-w-[120px] mx-auto mb-0.5" title={entry.matchedName}>
-                                {entry.matchedName}
-                              </p>
-                            )}
-                            <span className={`font-mono text-sm ${isBest ? 'text-success font-bold' : ''}`}>
-                              {price.toLocaleString()} TND
-                            </span>
-                          </div>
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className={`font-mono text-sm cursor-default ${isBest ? 'text-success font-bold' : ''}`}>
+                                  {price.toLocaleString()} TND
+                                </span>
+                              </TooltipTrigger>
+                              {entry?.matchedName && (
+                                <TooltipContent side="top" className="max-w-[250px]">
+                                  <p className="text-xs">{entry.matchedName}</p>
+                                </TooltipContent>
+                              )}
+                            </Tooltip>
+                          </TooltipProvider>
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
                         )}
