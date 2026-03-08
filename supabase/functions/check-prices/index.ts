@@ -33,26 +33,37 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function extractPrice(content: string, title: string, productName: string): number | null {
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function isPhoneLikeProduct(productName: string): boolean {
+  return /(iphone|samsung|galaxy|pixel|xiaomi|redmi|oppo|huawei)/i.test(productName);
+}
+
+function extractPrice(
+  content: string,
+  title: string,
+  productName: string,
+  store?: string,
+  referencePrice?: number | null,
+): number | null {
   const textToSearch = `${title} ${content}`;
-  
+
   const patterns = [
-    // Prices with currency markers: 4 299,000 DT or 4299 TND
-    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC|دينار)/gi,
-    // Prix: 4299 or Prix: 4 299,000
-    /(?:prix|price|tarif)\s*:?\s*(\d[\d\s.,]*\d)/gi,
-    // Common e-commerce: 4.299,000 or 4,299.000
+    /(?:prix|price|tarif)?\s*:?[\s\u00a0]*(\d[\d\s.,]*\d)[\s\u00a0]*(?:TND|DT|TTC|دينار)/gi,
+    /(?:TND|DT|TTC|دينار)[\s\u00a0]*(\d[\d\s.,]*\d)/gi,
     /(\d{1,2}[.,]\d{3}[.,]\d{3})/g,
-    // Numbers that look like prices (4 digits+) near product context
-    /(\d{1,2}\s?\d{3}(?:[.,]\d{1,3})?)\s*(?:TND|DT|TTC|dinars?)/gi,
+    /(\d{1,2}\s?\d{3}(?:[.,]\d{1,3})?)[\s\u00a0]*(?:TND|DT|TTC|dinars?)/gi,
   ];
 
-  const candidates: number[] = [];
+  const rawCandidates: number[] = [];
+
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(textToSearch)) !== null) {
       let priceStr = match[1].replace(/\s/g, '');
-      // Handle Tunisian format: 4.299,000 → 4299
       if (/^\d{1,3}\.\d{3}/.test(priceStr)) {
         priceStr = priceStr.replace(/\./g, '');
       }
@@ -60,37 +71,97 @@ function extractPrice(content: string, title: string, productName: string): numb
       priceStr = priceStr.replace(/\.0{3}$/, '');
       const price = parseFloat(priceStr);
       if (price >= 100 && price < 50000 && !isNaN(price)) {
-        candidates.push(price);
+        rawCandidates.push(price);
       }
     }
   }
-  
+
+  const minPrice = isPhoneLikeProduct(productName) ? 1500 : 100;
+  let candidates = rawCandidates.filter((p) => p >= minPrice);
+
   if (candidates.length > 0) {
-    // Return median price
     candidates.sort((a, b) => a - b);
-    const result = candidates[Math.floor(candidates.length / 2)];
-    console.log(`Regex found price for ${productName}: ${result} from ${candidates.length} candidates: [${candidates.join(', ')}]`);
+    let result = median(candidates);
+
+    if (store === 'tunisiatech' && isPhoneLikeProduct(productName)) {
+      let tunisiatechPool = candidates;
+
+      if (referencePrice && referencePrice > 0) {
+        const closeToMarket = candidates.filter(
+          (p) => p >= referencePrice * 0.6 && p <= referencePrice * 1.5,
+        );
+        if (closeToMarket.length > 0) {
+          tunisiatechPool = closeToMarket;
+        }
+
+        result = tunisiatechPool.reduce((closest, current) =>
+          Math.abs(current - referencePrice) < Math.abs(closest - referencePrice)
+            ? current
+            : closest,
+        tunisiatechPool[0]);
+      } else {
+        result = tunisiatechPool[Math.floor(tunisiatechPool.length * 0.75)];
+      }
+    }
+
+    console.log(`Regex found price for ${productName}: ${result} from ${candidates.length} filtered candidates: [${candidates.join(', ')}]`);
     return Math.round(result * 100) / 100;
   }
-  
-  // Last resort: try to find any 4-digit number in the content
+
+  if (store === 'tunisiatech' && isPhoneLikeProduct(productName)) {
+    return null;
+  }
+
   const lastResort = /\b(\d{4,5})\b/g;
   const nums: number[] = [];
   let m;
   while ((m = lastResort.exec(textToSearch)) !== null) {
     const n = parseInt(m[1]);
-    // Filter out years, model numbers etc
-    if (n >= 500 && n < 50000 && n > 2030) { // avoid years
+    if (n >= minPrice && n < 50000 && n > 2030) {
       nums.push(n);
     }
   }
+
   if (nums.length > 0) {
     nums.sort((a, b) => a - b);
     console.log(`Last resort price for ${productName}: ${nums[0]} from [${nums.join(', ')}]`);
     return nums[0];
   }
-  
+
   return null;
+}
+
+async function extractPriceFromDirectUrl(
+  url: string,
+  productName: string,
+  store: string,
+  referencePrice?: number | null,
+): Promise<number | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; LovablePriceBot/1.0)',
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const textOnly = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ');
+
+    const price = extractPrice(textOnly, '', productName, store, referencePrice);
+    if (price) {
+      console.log(`Direct URL price for ${productName} @ ${store}: ${price}`);
+    }
+    return price;
+  } catch (error) {
+    console.error(`Direct URL extraction failed for ${productName} @ ${store}:`, error);
+    return null;
+  }
 }
 
 
@@ -135,13 +206,28 @@ Deno.serve(async (req) => {
     for (const product of products as Product[]) {
       const urls = product.urls || {};
 
+      const { data: latestByProduct } = await supabase
+        .from('price_entries')
+        .select('store, price')
+        .eq('product_id', product.id)
+        .order('checked_at', { ascending: false });
+
+      const latestStorePrices: Record<string, number> = {};
+      if (latestByProduct) {
+        for (const row of latestByProduct) {
+          if (latestStorePrices[row.store] === undefined) {
+            latestStorePrices[row.store] = Number(row.price);
+          }
+        }
+      }
+
       for (const [store, url] of Object.entries(urls)) {
         if (!url) continue;
 
         try {
           // Use Tavily to search for the product price on the specific store
           const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
-          
+
           const tavilyResponse = await fetch('https://api.tavily.com/search', {
             method: 'POST',
             headers: {
@@ -165,18 +251,51 @@ Deno.serve(async (req) => {
           const tavilyData = await tavilyResponse.json();
           const results: TavilyResult[] = tavilyData.results || [];
 
+          const siblingPrices = Object.entries(latestStorePrices)
+            .filter(([s]) => s !== store)
+            .map(([, p]) => Number(p))
+            .concat(
+              newPriceEntries
+                .filter((entry) => entry.product_id === product.id && entry.store !== store)
+                .map((entry) => Number(entry.price)),
+            );
+
+          const referencePrice = siblingPrices.length > 0 ? median(siblingPrices) : null;
+
           // Try to extract price from results — combine all content for better context
           let foundPrice: number | null = null;
-          // Combine all results content (prefer raw_content for full page data)
           const allContent = results.map(r => `${r.title} ${(r as any).raw_content || r.content}`).join('\n');
           const allTitles = results.map(r => r.title).join(' | ');
-          foundPrice = extractPrice(allContent, allTitles, product.name);
+          foundPrice = extractPrice(allContent, allTitles, product.name, store, referencePrice);
+
+          const isSuspiciousTunisiatechPrice =
+            store === 'tunisiatech' &&
+            !!foundPrice &&
+            !!referencePrice &&
+            foundPrice < referencePrice * 0.6;
+
+          // Tunisiatech frequently returns listing snippets, so try exact URL extraction if needed
+          if ((store === 'tunisiatech') && (!foundPrice || isSuspiciousTunisiatechPrice)) {
+            foundPrice = await extractPriceFromDirectUrl(url, product.name, store, referencePrice);
+          }
+
+          if (
+            store === 'tunisiatech' &&
+            !!foundPrice &&
+            !!referencePrice &&
+            foundPrice < referencePrice * 0.6
+          ) {
+            console.log(`Discarding suspicious Tunisiatech price for ${product.name}: ${foundPrice} (ref: ${referencePrice})`);
+            foundPrice = null;
+          }
+
           console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'no price found'} (${results.length} results)`);
 
           // Add delay between store checks
           await sleep(1000);
 
           if (foundPrice) {
+            latestStorePrices[store] = foundPrice;
             newPriceEntries.push({
               product_id: product.id,
               store,
