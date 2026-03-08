@@ -21,13 +21,15 @@ const MonitoringControls = ({ status, onManualCheck, onToggleAuto }: MonitoringC
 
   const handleManualCheck = async () => {
     setIsChecking(true);
-    toast.info('🔍 Vérification des prix en cours...');
-    // Simulate check
-    setTimeout(() => {
-      setIsChecking(false);
-      onManualCheck();
+    toast.info('🔍 Vérification des prix en cours via Tavily...');
+    try {
+      await onManualCheck();
       toast.success('✅ Prix mis à jour avec succès !');
-    }, 2000);
+    } catch (err: any) {
+      toast.error(`❌ Erreur: ${err.message || 'Vérification échouée'}`);
+    } finally {
+      setIsChecking(false);
+    }
   };
 
   return (
