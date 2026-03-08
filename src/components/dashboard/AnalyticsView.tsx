@@ -94,16 +94,16 @@ const AnalyticsView = ({ products, prices }: AnalyticsViewProps) => {
     if (selectedProductId === 'all') {
       // Comparison bar chart across all products
       return (
-        <ResponsiveContainer width="100%" height={400}>
-          <BarChart data={comparisonData} margin={{ bottom: 60 }}>
+        <ResponsiveContainer width="100%" height={450}>
+          <BarChart data={comparisonData} margin={{ top: 30, bottom: 80, left: 10, right: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" angle={-30} textAnchor="end" />
+            <XAxis dataKey="name" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" angle={-45} textAnchor="end" interval={0} height={80} />
             <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
             <Tooltip
               contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
               formatter={(value: number, name: string) => [`${value.toLocaleString()} TND`, STORE_CONFIG[name as StoreName]?.label || name]}
             />
-            <Legend formatter={(value: string) => STORE_CONFIG[value as StoreName]?.label || value} />
+            <Legend verticalAlign="top" height={36} formatter={(value: string) => STORE_CONFIG[value as StoreName]?.label || value} />
             {(Object.keys(STORE_CONFIG) as StoreName[]).map(store => (
               <Bar key={store} dataKey={store} fill={storeColors[store]} radius={[4, 4, 0, 0]} />
             ))}
