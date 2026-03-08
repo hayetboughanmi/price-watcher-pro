@@ -1,9 +1,9 @@
 // =============================================================================
-// Send Email Edge Function — SMTP for Price Alert Notifications
+// Send Email Edge Function — Nodemailer SMTP for Price Alert Notifications
 // =============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
+import nodemailer from "npm:nodemailer@6.9.16";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -90,7 +90,7 @@ serve(async (req) => {
 
   try {
     const SMTP_HOST = Deno.env.get("SMTP_HOST");
-    const SMTP_PORT = Deno.env.get("SMTP_PORT");
+    const SMTP_PORT = Deno.env.get("SMTP_PORT") || "587";
     const SMTP_USER = Deno.env.get("SMTP_USER");
     const SMTP_PASSWORD = Deno.env.get("SMTP_PASSWORD");
     const FROM_EMAIL = Deno.env.get("SMTP_FROM_EMAIL");
@@ -112,40 +112,30 @@ serve(async (req) => {
       throw new Error("No recipient email provided");
     }
 
-    const client = new SmtpClient();
-
-    const port = parseInt(SMTP_PORT || "587");
-    if (port === 465) {
-      await client.connectTLS({
-        hostname: SMTP_HOST,
-        port,
-        username: SMTP_USER,
-        password: SMTP_PASSWORD,
-      });
-    } else {
-      await client.connect({
-        hostname: SMTP_HOST,
-        port,
-        username: SMTP_USER,
-        password: SMTP_PASSWORD,
-      });
-    }
+    const port = parseInt(SMTP_PORT);
+    const transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port,
+      secure: port === 465,
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASSWORD,
+      },
+    });
 
     const subject = `🔔 Mytek — ${alerts.length} alerte${alerts.length > 1 ? "s" : ""} prix`;
     const html = buildHtml(alerts);
 
     for (const recipient of recipients) {
-      await client.send({
+      await transporter.sendMail({
         from: FROM_EMAIL,
         to: recipient,
         subject,
-        content: "Veuillez utiliser un client email supportant le HTML.",
+        text: "Veuillez utiliser un client email supportant le HTML.",
         html,
       });
       console.log(`Email sent to ${recipient}`);
     }
-
-    await client.close();
 
     return new Response(JSON.stringify({ 
       message: `Email sent to ${recipients.length} recipient(s)`,
