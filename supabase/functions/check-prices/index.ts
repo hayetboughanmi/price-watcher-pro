@@ -206,13 +206,28 @@ Deno.serve(async (req) => {
     for (const product of products as Product[]) {
       const urls = product.urls || {};
 
+      const { data: latestByProduct } = await supabase
+        .from('price_entries')
+        .select('store, price')
+        .eq('product_id', product.id)
+        .order('checked_at', { ascending: false });
+
+      const latestStorePrices: Record<string, number> = {};
+      if (latestByProduct) {
+        for (const row of latestByProduct) {
+          if (latestStorePrices[row.store] === undefined) {
+            latestStorePrices[row.store] = Number(row.price);
+          }
+        }
+      }
+
       for (const [store, url] of Object.entries(urls)) {
         if (!url) continue;
 
         try {
           // Use Tavily to search for the product price on the specific store
           const searchQuery = `${product.name} prix site:${storeNames[store] || store}`;
-          
+
           const tavilyResponse = await fetch('https://api.tavily.com/search', {
             method: 'POST',
             headers: {
@@ -236,18 +251,35 @@ Deno.serve(async (req) => {
           const tavilyData = await tavilyResponse.json();
           const results: TavilyResult[] = tavilyData.results || [];
 
+          const siblingPrices = Object.entries(latestStorePrices)
+            .filter(([s]) => s !== store)
+            .map(([, p]) => Number(p))
+            .concat(
+              newPriceEntries
+                .filter((entry) => entry.product_id === product.id && entry.store !== store)
+                .map((entry) => Number(entry.price)),
+            );
+
+          const referencePrice = siblingPrices.length > 0 ? median(siblingPrices) : null;
+
           // Try to extract price from results — combine all content for better context
           let foundPrice: number | null = null;
-          // Combine all results content (prefer raw_content for full page data)
           const allContent = results.map(r => `${r.title} ${(r as any).raw_content || r.content}`).join('\n');
           const allTitles = results.map(r => r.title).join(' | ');
-          foundPrice = extractPrice(allContent, allTitles, product.name);
+          foundPrice = extractPrice(allContent, allTitles, product.name, store, referencePrice);
+
+          // Tunisiatech frequently returns listing snippets, so try exact URL extraction if needed
+          if (!foundPrice && store === 'tunisiatech') {
+            foundPrice = await extractPriceFromDirectUrl(url, product.name, store, referencePrice);
+          }
+
           console.log(`${product.name} @ ${store}: ${foundPrice ? foundPrice + ' TND' : 'no price found'} (${results.length} results)`);
 
           // Add delay between store checks
           await sleep(1000);
 
           if (foundPrice) {
+            latestStorePrices[store] = foundPrice;
             newPriceEntries.push({
               product_id: product.id,
               store,
