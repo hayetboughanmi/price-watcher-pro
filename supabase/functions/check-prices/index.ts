@@ -192,10 +192,10 @@ Deno.serve(async (req) => {
           const tavilyData = await tavilyResponse.json();
           const results: TavilyResult[] = tavilyData.results || [];
 
-          // Try to extract price from results
+          // Try to extract price from results — combine all content for better context
           let foundPrice: number | null = null;
           for (const result of results) {
-            foundPrice = extractPrice(result.content, result.title);
+            foundPrice = await extractPriceWithAI(result.content, result.title, product.name, store);
             if (foundPrice) break;
           }
 
