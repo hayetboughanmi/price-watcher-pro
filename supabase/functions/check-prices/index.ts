@@ -117,12 +117,15 @@ async function extractPriceWithAI(content: string, title: string, productName: s
 function extractPriceRegex(content: string, title: string): number | null {
   const textToSearch = `${title} ${content}`;
   
-  // Match prices with currency markers — require at least 4 digits total for electronics
   const patterns = [
-    // 4 299,000 DT or 4299.000 DT or 4 299 DT — must have 4+ digit value
-    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC)\b/gi,
-    // Prix: 4299 TND
-    /(?:prix|price|tarif)\s*:?\s*(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC)/gi,
+    // Prices with currency markers: 4 299,000 DT or 4299 TND
+    /(\d[\d\s.,]*\d)\s*(?:TND|DT|TTC|دينار)\b/gi,
+    // Prix: 4299 or Prix: 4 299
+    /(?:prix|price|tarif|سعر)\s*:?\s*(\d[\d\s.,]*\d)/gi,
+    // Price in common e-commerce formats: 4,299.000 or 4.299,000
+    /(\d{1,2}[.,]\d{3}[.,]\d{3})/g,
+    // Simple 4-digit+ numbers near price context
+    /(?:prix|price|اسعار|promo)\s*[:\-]?\s*(\d{3,6}(?:[.,]\d{1,3})?)/gi,
   ];
 
   const candidates: number[] = [];
@@ -132,21 +135,21 @@ function extractPriceRegex(content: string, title: string): number | null {
       let priceStr = match[1].replace(/\s/g, '');
       // Handle Tunisian format: 4.299,000 → 4299
       if (/^\d{1,3}\.\d{3}/.test(priceStr)) {
-        priceStr = priceStr.replace('.', '');
+        priceStr = priceStr.replace(/\./g, '');
       }
       priceStr = priceStr.replace(',', '.');
       priceStr = priceStr.replace(/\.0{3}$/, '');
       const price = parseFloat(priceStr);
-      // Electronics in Tunisia cost at least 1000 TND for phones/laptops
-      if (price >= 1000 && price < 50000) {
+      if (price >= 100 && price < 50000) {
         candidates.push(price);
       }
     }
   }
   
   if (candidates.length > 0) {
-    candidates.sort((a, b) => b - a);
-    return Math.round(candidates[0] * 100) / 100;
+    // Return the most common price, or the median
+    candidates.sort((a, b) => a - b);
+    return Math.round(candidates[Math.floor(candidates.length / 2)] * 100) / 100;
   }
   return null;
 }
