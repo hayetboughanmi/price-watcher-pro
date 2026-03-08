@@ -1,16 +1,7 @@
 // =============================================================================
 // AI Recommendation Edge Function for Mytek Price Monitoring
 // =============================================================================
-// 
-// 🔑 API KEY CONFIGURATION:
-// 
-// On Lovable Cloud: Uses LOVABLE_API_KEY (auto-configured, no setup needed)
-// 
-// On VS Code / Local development: You need your own OpenAI API key.
-// Set this environment variable in your .env file:
-//   OPENAI_API_KEY=sk-your-openai-api-key-here
-//
-// Get your OpenAI API key at: https://platform.openai.com/api-keys
+// Uses OpenAI API directly with OPENAI_API_KEY secret
 // =============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
