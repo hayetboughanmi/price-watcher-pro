@@ -67,7 +67,6 @@ Contenu de la page:
 ${truncated}`,
           },
         ],
-        temperature: 0,
         max_completion_tokens: 30,
       }),
     });
