@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Eye, Trash2 } from 'lucide-react';
 import { Product, PriceEntry, STORE_CONFIG, StoreName } from '@/types';
 import { motion } from 'framer-motion';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 interface ProductTableProps {
   products: Product[];
