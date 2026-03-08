@@ -86,8 +86,7 @@ ${truncated}`,
       return null;
     }
 
-    const cleaned = answer.replace(/[^
-\d.,]/g, '').replace(',', '.');
+    const cleaned = answer.replace(/[^\d.,]/g, '').replace(',', '.');
     const price = parseFloat(cleaned);
 
     if (!isNaN(price) && price >= 100 && price < 50000) {
