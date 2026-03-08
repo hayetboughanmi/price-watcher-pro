@@ -33,16 +33,9 @@ serve(async (req) => {
     //    uncomment the OPENAI_API_KEY block instead
     // =========================================================================
     
-    // --- Lovable Cloud (default) ---
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
-    const aiUrl = LOVABLE_AI_URL;
-
-    // --- VS Code / Local (uncomment this block, comment the block above) ---
-    // const apiKey = Deno.env.get("OPENAI_API_KEY");
-    // if (!apiKey) throw new Error("OPENAI_API_KEY is not configured. Add it to your .env file.");
-    // const aiUrl = "https://api.openai.com/v1/chat/completions";
-    // =========================================================================
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+    const aiUrl = OPENAI_URL;
 
     const priceContext = allPrices 
       ? `Prix actuels chez les concurrents:\n${Object.entries(allPrices).map(([s, p]) => `- ${s}: ${p} TND`).join('\n')}`
