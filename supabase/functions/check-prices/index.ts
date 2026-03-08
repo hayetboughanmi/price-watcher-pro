@@ -53,7 +53,10 @@ async function extractPriceWithAI(
             content: `Tu es un extracteur de prix e-commerce ultra strict.
 On te donne le contenu texte d'une page web tunisienne + un produit exact.
 Règles:
-- Retourne le prix en TND/DT du PRODUIT EXACT uniquement (ignore Pro/Plus/Max/autres variantes).
+- Retourne le prix en TND/DT du PRODUIT EXACT uniquement.
+- Considère comme équivalents: 128go = 128 go = 128gb (idem pour autres capacités).
+- Ignore les différences mineures de casse, accents, tirets et espaces.
+- Ignore Pro/Plus/Max si ce n'est pas explicitement demandé.
 - Si prix promo existe, retourne le prix promo.
 - Si produit indisponible ou introuvable, retourne NOT_FOUND.
 - Réponse = uniquement un nombre (ex: 2899) ou NOT_FOUND.`,
