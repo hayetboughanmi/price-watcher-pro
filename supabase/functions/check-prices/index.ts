@@ -36,8 +36,8 @@ async function extractPriceWithAI(
   apiKey: string,
 ): Promise<number | null> {
   try {
-    // Truncate content to avoid token limits
-    const truncated = content.slice(0, 12000);
+    // Keep enough content because product grids often appear later in the page
+    const truncated = content.slice(0, 50000);
 
     const response = await fetch(LOVABLE_AI_URL, {
       method: "POST",
