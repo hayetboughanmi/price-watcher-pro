@@ -118,8 +118,8 @@ ${truncated}`,
     if (!response.ok) {
       // Retry once on rate limit (429) after waiting
       if (response.status === 429) {
-        console.log(`Rate limited for ${storeName}, retrying in 5s...`);
-        await new Promise(r => setTimeout(r, 5000));
+        console.log(`Rate limited for ${storeName}, retrying in 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
         const retryResponse = await fetch(AI_GATEWAY_URL, {
           method: 'POST',
           headers: {
