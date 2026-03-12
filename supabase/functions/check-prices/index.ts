@@ -207,19 +207,27 @@ Deno.serve(async (req) => {
       })
     );
 
-    // Step 2: Parse prices with AI in parallel
-    const parseResults = await Promise.allSettled(
-      extractResults.map(async (result) => {
-        if (result.status !== 'fulfilled' || !result.value.content) {
-          return result.status === 'fulfilled' 
+    // Step 2: Parse prices with AI sequentially (avoid rate limiting)
+    const parseResults: Array<{ status: 'fulfilled'; value: any }> = [];
+    for (const result of extractResults) {
+      if (result.status !== 'fulfilled' || !result.value.content) {
+        parseResults.push({
+          status: 'fulfilled',
+          value: result.status === 'fulfilled'
             ? { ...result.value, price: null, matchedName: null }
-            : null;
-        }
-        const { product, store, storeLabel, content } = result.value;
-        const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
-        return { product, store, storeLabel, price: parsed?.price || null, matchedName: parsed?.matchedName || null };
-      })
-    );
+            : null,
+        });
+        continue;
+      }
+      const { product, store, storeLabel, content } = result.value;
+      // Small delay between AI calls to avoid rate limiting
+      await new Promise(r => setTimeout(r, 300));
+      const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
+      parseResults.push({
+        status: 'fulfilled',
+        value: { product, store, storeLabel, price: parsed?.price || null, matchedName: parsed?.matchedName || null },
+      });
+    }
 
     const newPriceEntries: any[] = [];
     const alertCandidates: any[] = [];
