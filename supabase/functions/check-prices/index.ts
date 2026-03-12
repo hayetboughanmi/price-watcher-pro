@@ -138,8 +138,9 @@ ${truncated}`,
       // Handle millimes (some stores return price × 1000)
       if (price > 50000) price = price / 1000;
       if (price >= 50 && price < 50000) {
-      console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${parsed.product_matched || 'N/A'})`);
-      return { price: Math.round(price * 100) / 100, matchedName: parsed.product_matched || null };
+        console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${parsed.product_matched || 'N/A'})`);
+        return { price: Math.round(price * 100) / 100, matchedName: parsed.product_matched || null };
+      }
     }
 
     console.log(`Invalid price from ${storeName}: ${parsed.price}`);
