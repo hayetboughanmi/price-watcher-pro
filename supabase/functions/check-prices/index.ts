@@ -240,16 +240,21 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Step 1: Extract all pages in parallel via Tavily
-    const extractResults = await Promise.allSettled(
-      tasks.map(async (task) => {
-        const searchUrl = buildStoreSearchUrl(task.store, task.product.name);
-        if (!searchUrl) return { ...task, content: null };
-        console.log(`Extracting ${task.product.name} @ ${task.storeLabel}...`);
-        const content = await extractPageContent(searchUrl, task.storeLabel, TAVILY_API_KEY);
-        return { ...task, content };
-      })
-    );
+    // Step 1: Extract pages via Tavily in batches of 4
+    const extractResults: PromiseSettledResult<any>[] = [];
+    for (let i = 0; i < tasks.length; i += 4) {
+      const batch = tasks.slice(i, i + 4);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (task) => {
+          const searchUrl = buildStoreSearchUrl(task.store, task.product.name);
+          if (!searchUrl) return { ...task, content: null };
+          console.log(`Extracting ${task.product.name} @ ${task.storeLabel}...`);
+          const content = await extractPageContent(searchUrl, task.storeLabel, TAVILY_API_KEY);
+          return { ...task, content };
+        })
+      );
+      extractResults.push(...batchResults);
+    }
 
     // Step 2: Parse prices with AI in batches of 3 (avoid rate limiting)
     const validExtracts = extractResults
