@@ -202,17 +202,27 @@ Deno.serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const { data: products, error: productsError } = await supabase
+    const { data: allProducts, error: productsError } = await supabase
       .from('products')
       .select('*')
       .eq('is_monitored', true);
 
     if (productsError) throw productsError;
-    if (!products || products.length === 0) {
+    if (!allProducts || allProducts.length === 0) {
       return new Response(JSON.stringify({ message: 'No monitored products', checked: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    // Deduplicate products by name (keep first occurrence)
+    const seenNames = new Set<string>();
+    const products = (allProducts as Product[]).filter(p => {
+      const key = p.name.toLowerCase().trim();
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
+    console.log(`Processing ${products.length} unique products (${allProducts.length} total)`);
 
     const storeLabels: Record<string, string> = {
       tunisianet: 'Tunisianet',
@@ -224,7 +234,7 @@ Deno.serve(async (req) => {
     // Build all tasks
     type Task = { product: Product; store: string; storeLabel: string };
     const tasks: Task[] = [];
-    for (const product of products as Product[]) {
+    for (const product of products) {
       for (const [store] of Object.entries(product.urls || {})) {
         tasks.push({ product, store, storeLabel: storeLabels[store] || store });
       }
