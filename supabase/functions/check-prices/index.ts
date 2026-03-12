@@ -251,26 +251,36 @@ Deno.serve(async (req) => {
       })
     );
 
-    // Step 2: Parse prices with AI sequentially (avoid rate limiting)
+    // Step 2: Parse prices with AI in batches of 3 (avoid rate limiting)
+    const validExtracts = extractResults
+      .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && !!r.value?.content)
+      .map(r => r.value);
+
     const parseResults: Array<{ status: 'fulfilled'; value: any }> = [];
+    
+    // Add null results for failed extracts
     for (const result of extractResults) {
-      if (result.status !== 'fulfilled' || !result.value.content) {
+      if (result.status !== 'fulfilled' || !result.value?.content) {
         parseResults.push({
           status: 'fulfilled',
-          value: result.status === 'fulfilled'
-            ? { ...result.value, price: null, matchedName: null }
-            : null,
+          value: result.status === 'fulfilled' ? { ...result.value, price: null, matchedName: null } : null,
         });
-        continue;
       }
-      const { product, store, storeLabel, content } = result.value;
-      // Small delay between AI calls to avoid rate limiting
-      await new Promise(r => setTimeout(r, 1000));
-      const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
-      parseResults.push({
-        status: 'fulfilled',
-        value: { product, store, storeLabel, price: parsed?.price || null, matchedName: parsed?.matchedName || null },
-      });
+    }
+
+    // Process valid extracts in batches of 3
+    for (let i = 0; i < validExtracts.length; i += 3) {
+      const batch = validExtracts.slice(i, i + 3);
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      const batchResults = await Promise.all(
+        batch.map(async ({ product, store, storeLabel, content }) => {
+          const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
+          return { product, store, storeLabel, price: parsed?.price || null, matchedName: parsed?.matchedName || null };
+        })
+      );
+      for (const val of batchResults) {
+        parseResults.push({ status: 'fulfilled', value: val });
+      }
     }
 
     const newPriceEntries: any[] = [];
