@@ -116,6 +116,40 @@ ${truncated}`,
     });
 
     if (!response.ok) {
+      // Retry once on rate limit (429) after waiting
+      if (response.status === 429) {
+        console.log(`Rate limited for ${storeName}, retrying in 5s...`);
+        await new Promise(r => setTimeout(r, 5000));
+        const retryResponse = await fetch(AI_GATEWAY_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${lovableApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash-lite',
+            messages: [
+              { role: 'system', content: `You extract product prices from web page content. Return ONLY valid JSON, no markdown.` },
+              { role: 'user', content: `Find the price in TND (Tunisian Dinar) for "${productName}" in this page content from ${storeName}.\n\nRules:\n- Only match the EXACT model\n- If promo price exists, return the promo price\n- Return found:false if the exact product is not found\n\nReturn JSON: {"price": number|null, "found": boolean, "product_matched": "string|null"}\n\nPage content:\n${content.substring(0, 8000)}` },
+            ],
+            temperature: 0,
+            max_tokens: 200,
+          }),
+        });
+        if (!retryResponse.ok) {
+          console.error(`AI retry failed (${retryResponse.status}) for ${storeName}`);
+          return null;
+        }
+        const retryData = await retryResponse.json();
+        const retryRaw = retryData.choices?.[0]?.message?.content || '';
+        const retryCleaned = retryRaw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const retryParsed = JSON.parse(retryCleaned);
+        if (!retryParsed.found || !retryParsed.price) return null;
+        let rp = Number(retryParsed.price);
+        if (rp > 50000) rp = rp / 1000;
+        if (rp >= 50 && rp < 50000) return { price: Math.round(rp * 100) / 100, matchedName: retryParsed.product_matched || null };
+        return null;
+      }
       const errText = await response.text();
       console.error(`AI parse error (${response.status}) for ${storeName}:`, errText);
       return null;
