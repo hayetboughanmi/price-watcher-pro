@@ -116,6 +116,40 @@ ${truncated}`,
     });
 
     if (!response.ok) {
+      // Retry once on rate limit (429) after waiting
+      if (response.status === 429) {
+        console.log(`Rate limited for ${storeName}, retrying in 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
+        const retryResponse = await fetch(AI_GATEWAY_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${lovableApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash-lite',
+            messages: [
+              { role: 'system', content: `You extract product prices from web page content. Return ONLY valid JSON, no markdown.` },
+              { role: 'user', content: `Find the price in TND (Tunisian Dinar) for "${productName}" in this page content from ${storeName}.\n\nRules:\n- Only match the EXACT model\n- If promo price exists, return the promo price\n- Return found:false if the exact product is not found\n\nReturn JSON: {"price": number|null, "found": boolean, "product_matched": "string|null"}\n\nPage content:\n${content.substring(0, 8000)}` },
+            ],
+            temperature: 0,
+            max_tokens: 200,
+          }),
+        });
+        if (!retryResponse.ok) {
+          console.error(`AI retry failed (${retryResponse.status}) for ${storeName}`);
+          return null;
+        }
+        const retryData = await retryResponse.json();
+        const retryRaw = retryData.choices?.[0]?.message?.content || '';
+        const retryCleaned = retryRaw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const retryParsed = JSON.parse(retryCleaned);
+        if (!retryParsed.found || !retryParsed.price) return null;
+        let rp = Number(retryParsed.price);
+        if (rp > 50000) rp = rp / 1000;
+        if (rp >= 50 && rp < 50000) return { price: Math.round(rp * 100) / 100, matchedName: retryParsed.product_matched || null };
+        return null;
+      }
       const errText = await response.text();
       console.error(`AI parse error (${response.status}) for ${storeName}:`, errText);
       return null;
@@ -133,10 +167,14 @@ ${truncated}`,
       return null;
     }
 
-    const price = Number(parsed.price);
-    if (!isNaN(price) && price >= 100 && price < 50000) {
-      console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${parsed.product_matched || 'N/A'})`);
-      return { price: Math.round(price * 100) / 100, matchedName: parsed.product_matched || null };
+    let price = Number(parsed.price);
+    if (!isNaN(price) && price > 0) {
+      // Handle millimes (some stores return price × 1000)
+      if (price > 50000) price = price / 1000;
+      if (price >= 50 && price < 50000) {
+        console.log(`Found: ${productName} @ ${storeName}: ${price} TND (matched: ${parsed.product_matched || 'N/A'})`);
+        return { price: Math.round(price * 100) / 100, matchedName: parsed.product_matched || null };
+      }
     }
 
     console.log(`Invalid price from ${storeName}: ${parsed.price}`);
@@ -164,17 +202,27 @@ Deno.serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const { data: products, error: productsError } = await supabase
+    const { data: allProducts, error: productsError } = await supabase
       .from('products')
       .select('*')
       .eq('is_monitored', true);
 
     if (productsError) throw productsError;
-    if (!products || products.length === 0) {
+    if (!allProducts || allProducts.length === 0) {
       return new Response(JSON.stringify({ message: 'No monitored products', checked: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    // Deduplicate products by name (keep first occurrence)
+    const seenNames = new Set<string>();
+    const products = (allProducts as Product[]).filter(p => {
+      const key = p.name.toLowerCase().trim();
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
+    console.log(`Processing ${products.length} unique products (${allProducts.length} total)`);
 
     const storeLabels: Record<string, string> = {
       tunisianet: 'Tunisianet',
@@ -186,36 +234,59 @@ Deno.serve(async (req) => {
     // Build all tasks
     type Task = { product: Product; store: string; storeLabel: string };
     const tasks: Task[] = [];
-    for (const product of products as Product[]) {
+    for (const product of products) {
       for (const [store] of Object.entries(product.urls || {})) {
         tasks.push({ product, store, storeLabel: storeLabels[store] || store });
       }
     }
 
-    // Step 1: Extract all pages in parallel via Tavily
-    const extractResults = await Promise.allSettled(
-      tasks.map(async (task) => {
-        const searchUrl = buildStoreSearchUrl(task.store, task.product.name);
-        if (!searchUrl) return { ...task, content: null };
-        console.log(`Extracting ${task.product.name} @ ${task.storeLabel}...`);
-        const content = await extractPageContent(searchUrl, task.storeLabel, TAVILY_API_KEY);
-        return { ...task, content };
-      })
-    );
+    // Step 1: Extract pages via Tavily in batches of 4
+    const extractResults: PromiseSettledResult<any>[] = [];
+    for (let i = 0; i < tasks.length; i += 4) {
+      const batch = tasks.slice(i, i + 4);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (task) => {
+          const searchUrl = buildStoreSearchUrl(task.store, task.product.name);
+          if (!searchUrl) return { ...task, content: null };
+          console.log(`Extracting ${task.product.name} @ ${task.storeLabel}...`);
+          const content = await extractPageContent(searchUrl, task.storeLabel, TAVILY_API_KEY);
+          return { ...task, content };
+        })
+      );
+      extractResults.push(...batchResults);
+    }
 
-    // Step 2: Parse prices with AI in parallel
-    const parseResults = await Promise.allSettled(
-      extractResults.map(async (result) => {
-        if (result.status !== 'fulfilled' || !result.value.content) {
-          return result.status === 'fulfilled' 
-            ? { ...result.value, price: null, matchedName: null }
-            : null;
-        }
-        const { product, store, storeLabel, content } = result.value;
-        const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
-        return { product, store, storeLabel, price: parsed?.price || null, matchedName: parsed?.matchedName || null };
-      })
-    );
+    // Step 2: Parse prices with AI in batches of 3 (avoid rate limiting)
+    const validExtracts = extractResults
+      .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && !!r.value?.content)
+      .map(r => r.value);
+
+    const parseResults: Array<{ status: 'fulfilled'; value: any }> = [];
+    
+    // Add null results for failed extracts
+    for (const result of extractResults) {
+      if (result.status !== 'fulfilled' || !result.value?.content) {
+        parseResults.push({
+          status: 'fulfilled',
+          value: result.status === 'fulfilled' ? { ...result.value, price: null, matchedName: null } : null,
+        });
+      }
+    }
+
+    // Process valid extracts in batches of 3
+    for (let i = 0; i < validExtracts.length; i += 3) {
+      const batch = validExtracts.slice(i, i + 3);
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      const batchResults = await Promise.all(
+        batch.map(async ({ product, store, storeLabel, content }) => {
+          const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
+          return { product, store, storeLabel, price: parsed?.price || null, matchedName: parsed?.matchedName || null };
+        })
+      );
+      for (const val of batchResults) {
+        parseResults.push({ status: 'fulfilled', value: val });
+      }
+    }
 
     const newPriceEntries: any[] = [];
     const alertCandidates: any[] = [];
