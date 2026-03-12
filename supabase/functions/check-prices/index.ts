@@ -265,7 +265,7 @@ Deno.serve(async (req) => {
       }
       const { product, store, storeLabel, content } = result.value;
       // Small delay between AI calls to avoid rate limiting
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 2000));
       const parsed = await parsePriceWithAI(content, product.name, storeLabel, LOVABLE_API_KEY);
       parseResults.push({
         status: 'fulfilled',
